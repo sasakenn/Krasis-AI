@@ -1,0 +1,9 @@
+anthropic
+python-dotenv
+requests
+fastapi
+python-multipart
+uvicorn[standard]
+pypdf
+python-docx
+pytest

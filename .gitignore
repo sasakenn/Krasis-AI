@@ -1,0 +1,20 @@
+# secrets
+.env
+
+# python
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# node
+frontend/node_modules/
+frontend/dist/
+
+# runtime artifacts (created by start.sh / stop.sh)
+logs/
+.run/
+
+# editor / OS
+.DS_Store
+.claude/
