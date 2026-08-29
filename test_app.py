@@ -209,6 +209,37 @@ def test_generate_extracts_docx_text():
     assert "Use APA 7th edition style with 6 sections" in captured["format_notes"]
 
 
+def test_generate_persists_to_history_and_can_be_fetched_back():
+    with patch("app.search_literature", side_effect=_fake_literature):
+        resp = client.post(
+            "/generate",
+            data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    generation_id = body["id"]
+
+    history_resp = client.get("/history")
+    assert history_resp.status_code == 200
+    items = history_resp.json()["items"]
+    assert any(item["id"] == generation_id for item in items)
+    matching = next(item for item in items if item["id"] == generation_id)
+    assert matching["topic"] == "生成AIと教育"
+    assert matching["title"] == body["title"]
+
+    detail_resp = client.get(f"/history/{generation_id}")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert detail["outline"]["title"] == body["title"]
+    assert detail["outline"]["sections"] == body["sections"]
+
+
+def test_history_detail_404_for_unknown_id():
+    resp = client.get("/history/999999999")
+    assert resp.status_code == 404
+
+
 def test_generate_handles_corrupted_pdf_gracefully():
     captured = {}
 

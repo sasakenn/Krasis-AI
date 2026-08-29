@@ -15,6 +15,9 @@ frontend/dist/
 logs/
 .run/
 
+# SQLite database (generation history)
+data/
+
 # editor / OS
 .DS_Store
 .claude/

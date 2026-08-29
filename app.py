@@ -7,10 +7,12 @@ from docx import Document
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from pypdf import PdfReader
 
+from db import get_generation, init_db, list_generations, save_generation
 from outline import generate_outline
 from search import search_literature
 
 app = FastAPI()
+init_db()
 
 # 内容を抜粋してプロンプトに含める対応ファイル形式。それ以外はファイル名のみ考慮する。
 TEXT_FILE_EXTENSIONS = {".txt", ".md", ".markdown", ".csv"}
@@ -144,7 +146,21 @@ async def generate(
     outline = generate_outline(topic, field, reference_notes, format_notes, target_length)
     outline = _attach_literature(outline)
     outline["type"] = "outline"
+    outline["id"] = save_generation(topic, field, target_length, outline)
     return outline
+
+
+@app.get("/history")
+def history(limit: int = 50):
+    return {"items": list_generations(limit=limit)}
+
+
+@app.get("/history/{generation_id}")
+def history_detail(generation_id: int):
+    record = get_generation(generation_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="generation not found")
+    return record
 
 
 if __name__ == '__main__':

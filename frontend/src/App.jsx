@@ -121,7 +121,7 @@ function LengthQuestion({ question, onChoose }) {
   )
 }
 
-function Workspace({ messages, onMessages, onFirstTopic }) {
+function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
   const [topic, setTopic] = useState('')
   const [field, setField] = useState(DEFAULT_FIELD)
   const [referenceFiles, setReferenceFiles] = useState([])
@@ -215,6 +215,7 @@ function Workspace({ messages, onMessages, onFirstTopic }) {
       } else {
         onMessages((prev) => [...prev, { role: 'assistant', outline: data }])
         resetComposer()
+        onGenerated?.()
       }
     } catch (err) {
       setError(String(err))
@@ -238,6 +239,7 @@ function Workspace({ messages, onMessages, onFirstTopic }) {
       const data = await submitGenerate({ ...pendingRequest, targetLength: optionKey })
       onMessages((prev) => [...prev, { role: 'assistant', outline: data }])
       resetComposer()
+      onGenerated?.()
     } catch (err) {
       setError(String(err))
       onMessages((prev) => [...prev, { role: 'assistant', error: String(err) }])
@@ -395,6 +397,23 @@ export default function App() {
     }
   }, [sessions, activeId])
 
+  const [historyItems, setHistoryItems] = useState([])
+
+  async function refreshHistory() {
+    try {
+      const resp = await fetch('/history')
+      if (!resp.ok) return
+      const data = await resp.json()
+      setHistoryItems(data.items ?? [])
+    } catch {
+      // 履歴の取得に失敗しても致命的ではないので黙って諦める
+    }
+  }
+
+  useEffect(() => {
+    refreshHistory()
+  }, [])
+
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0]
 
   function updateSession(id, updater) {
@@ -416,6 +435,36 @@ export default function App() {
     const id = nextId.current++
     setSessions((prev) => [...prev, makeSession(id)])
     setActiveId(id)
+  }
+
+  async function openHistoryItem(item) {
+    try {
+      const resp = await fetch(`/history/${item.id}`)
+      if (!resp.ok) return
+      const record = await resp.json()
+
+      const id = nextId.current++
+      setSessions((prev) => [
+        ...prev,
+        {
+          id,
+          title: (record.title || NEW_TAB_TITLE).slice(0, 20),
+          messages: [
+            {
+              role: 'user',
+              topic: record.topic,
+              field: record.field,
+              referenceFileNames: [],
+              formatFileName: null,
+            },
+            { role: 'assistant', outline: record.outline },
+          ],
+        },
+      ])
+      setActiveId(id)
+    } catch {
+      // 履歴の読み込みに失敗しても致命的ではないので黙って諦める
+    }
   }
 
   function closeTab(id) {
@@ -464,6 +513,31 @@ export default function App() {
         <aside className="sidebar">
           <div className="sidebar-brand">📚 Paper Assistant</div>
           <div className="sidebar-channel active"># outline-generator</div>
+
+          <div className="sidebar-history">
+            <div className="sidebar-history-title">履歴</div>
+            {historyItems.length === 0 ? (
+              <div className="sidebar-history-empty">まだ生成履歴がありません</div>
+            ) : (
+              <ul className="sidebar-history-list">
+                {historyItems.map((item) => (
+                  <li key={item.id}>
+                    <button type="button" onClick={() => openHistoryItem(item)}>
+                      <span className="history-item-title">{item.title}</span>
+                      <span className="history-item-date">
+                        {new Date(item.created_at).toLocaleString('ja-JP', {
+                          month: 'numeric',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </aside>
 
         <div className="main">
@@ -477,6 +551,7 @@ export default function App() {
             messages={activeSession.messages}
             onMessages={(updater) => setMessagesFor(activeSession.id, updater)}
             onFirstTopic={(topic) => setTitleFor(activeSession.id, topic)}
+            onGenerated={refreshHistory}
           />
         </div>
       </div>

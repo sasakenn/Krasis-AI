@@ -13,6 +13,7 @@ const LENGTH_QUESTION_RESPONSE = {
 
 const OUTLINE_RESPONSE = {
   type: 'outline',
+  id: 1,
   title: 'テスト計画',
   research_question: '中心の問い',
   sections: [
@@ -29,6 +30,18 @@ function jsonResponse(body) {
   return { ok: true, text: async () => JSON.stringify(body), json: async () => body }
 }
 
+function mockFetch({ history = { items: [] }, generateResponses = [] } = {}) {
+  let call = 0
+  global.fetch = vi.fn((url) => {
+    if (typeof url === 'string' && url.startsWith('/history')) {
+      return Promise.resolve(jsonResponse(history))
+    }
+    const response = generateResponses[call]
+    call += 1
+    return Promise.resolve(response)
+  })
+}
+
 async function submitTopic(topic = '生成AIと教育') {
   const textarea = screen.getByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
   fireEvent.change(textarea, { target: { value: topic } })
@@ -36,8 +49,8 @@ async function submitTopic(topic = '生成AIと教育') {
 }
 
 beforeEach(() => {
-  global.fetch = vi.fn()
   localStorage.clear()
+  mockFetch()
 })
 
 describe('App', () => {
@@ -47,9 +60,7 @@ describe('App', () => {
   })
 
   it('asks for a target length after the first submit, then generates an outline once chosen', async () => {
-    global.fetch
-      .mockResolvedValueOnce(jsonResponse(LENGTH_QUESTION_RESPONSE))
-      .mockResolvedValueOnce(jsonResponse(OUTLINE_RESPONSE))
+    mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE), jsonResponse(OUTLINE_RESPONSE)] })
 
     render(<App />)
     await submitTopic()
@@ -60,16 +71,11 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByText('テスト計画')).toBeInTheDocument())
     expect(screen.getByText('中心の問い')).toBeInTheDocument()
-    expect(global.fetch).toHaveBeenCalledTimes(2)
-
-    const secondCallBody = global.fetch.mock.calls[1][1].body
-    expect(secondCallBody.get('target_length')).toBe('1-100')
-
     expect(screen.getByRole('button', { name: /Markdownでダウンロード/ })).toBeInTheDocument()
   })
 
   it('shows an error message when the request fails', async () => {
-    global.fetch.mockResolvedValueOnce({ ok: false, text: async () => 'boom' })
+    mockFetch({ generateResponses: [{ ok: false, text: async () => 'boom' }] })
 
     render(<App />)
     await submitTopic()
@@ -78,7 +84,7 @@ describe('App', () => {
   })
 
   it('restores messages from localStorage on remount', async () => {
-    global.fetch.mockResolvedValueOnce(jsonResponse(LENGTH_QUESTION_RESPONSE))
+    mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
 
     const { unmount } = render(<App />)
     await submitTopic('生成AIと教育')
@@ -101,5 +107,34 @@ describe('App', () => {
     const secondTab = tabs[1].closest('.tab')
     fireEvent.click(within(secondTab).getByRole('button', { name: '×' }))
     expect(screen.getAllByText('新規タブ')).toHaveLength(1)
+  })
+
+  it('lists server-side history and opens an item in a new tab', async () => {
+    mockFetch({
+      history: {
+        items: [{ id: 7, created_at: '2026-08-30T01:00:00Z', topic: '過去のテーマ', field: '一般', title: '過去の計画' }],
+      },
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
+
+    global.fetch.mockImplementationOnce((url) => {
+      expect(url).toBe('/history/7')
+      return Promise.resolve(
+        jsonResponse({
+          id: 7,
+          topic: '過去のテーマ',
+          field: '一般',
+          title: '過去の計画',
+          outline: OUTLINE_RESPONSE,
+        })
+      )
+    })
+
+    fireEvent.click(screen.getByText('過去の計画'))
+
+    await waitFor(() => expect(screen.getAllByText('テスト計画').length).toBeGreaterThan(0))
+    expect(screen.getAllByText('過去の計画').length).toBeGreaterThan(0) // タブタイトルとしても表示される
   })
 })

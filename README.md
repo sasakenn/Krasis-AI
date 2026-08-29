@@ -76,9 +76,28 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 任意で参考資料・フォーマット指定ファイルも添付できます: `-F "reference_files=@notes.txt" -F "format_file=@format.txt"`
 
+## 生成履歴(SQLite)
+
+`/generate` で生成に成功したアウトラインは、サーバー側のSQLite(`data/app.db`、初回起動時に自動作成)へ自動保存されます。
+
+```bash
+curl http://127.0.0.1:8000/history            # 履歴一覧(新しい順、id/topic/field/title/created_at)
+curl http://127.0.0.1:8000/history/1          # 特定の履歴の詳細(アウトライン全体を含む)
+```
+
+フロントエンドのサイドバーにも「履歴」として一覧表示され、クリックすると新しいタブでその内容を開き直せます。`data/` は`.gitignore`対象です。
+
+## テスト
+
+```bash
+./venv/bin/python -m pytest         # バックエンド
+cd frontend && npm test             # フロントエンド(Vitest + Testing Library)
+```
+
 ## 構成
 
-- `app.py`: Web API(`/generate`, `/health`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。
+- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
+- `db.py`: 生成履歴をSQLiteに保存・参照する(`save_generation` / `list_generations` / `get_generation`)。
 - `frontend/`: React(Vite)フロントエンド。Slack風のチャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。
