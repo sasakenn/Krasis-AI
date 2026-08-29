@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 const DEFAULT_FIELD = '一般'
 const NEW_TAB_TITLE = '新規タブ'
+const STORAGE_KEY = 'paper-assistant-sessions'
 
 function useFileDrop(onFiles) {
   return {
@@ -17,10 +18,59 @@ function makeSession(id) {
   return { id, title: NEW_TAB_TITLE, messages: [] }
 }
 
+function loadStoredSessions() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function outlineToMarkdown(outline) {
+  const lines = [`# ${outline.title}`, '', `**中心の問い**: ${outline.research_question}`, '']
+
+  outline.sections.forEach((section, i) => {
+    lines.push(`## ${i + 1}. ${section.heading}`, '', section.purpose, '')
+    lines.push(`検索キーワード: \`${section.search_query}\``, '')
+
+    if (section.literature && section.literature.length > 0) {
+      lines.push('関連文献:')
+      section.literature.forEach((paper) => {
+        const authors = paper.authors && paper.authors.length > 0 ? paper.authors.join(', ') : '著者不明'
+        const year = paper.year ? ` (${paper.year})` : ''
+        lines.push(`- [${paper.title}](${paper.url}) — ${authors}${year}`)
+      })
+      lines.push('')
+    }
+  })
+
+  return lines.join('\n')
+}
+
+function downloadMarkdown(outline) {
+  const markdown = outlineToMarkdown(outline)
+  const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${outline.title.slice(0, 50) || 'outline'}.md`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
 function OutlineResult({ outline }) {
   return (
     <div className="result">
-      <h2>{outline.title}</h2>
+      <div className="result-header">
+        <h2>{outline.title}</h2>
+        <button type="button" className="export-button" onClick={() => downloadMarkdown(outline)}>
+          📄 Markdownでダウンロード
+        </button>
+      </div>
       <p className="research-question">{outline.research_question}</p>
       <div className="sections">
         {outline.sections.map((section, i) => (
@@ -332,9 +382,18 @@ function Workspace({ messages, onMessages, onFirstTopic }) {
 }
 
 export default function App() {
-  const [sessions, setSessions] = useState([makeSession(1)])
-  const [activeId, setActiveId] = useState(1)
-  const nextId = useRef(2)
+  const stored = loadStoredSessions()
+  const [sessions, setSessions] = useState(stored?.sessions ?? [makeSession(1)])
+  const [activeId, setActiveId] = useState(stored?.activeId ?? stored?.sessions?.[0]?.id ?? 1)
+  const nextId = useRef(Math.max(1, ...(stored?.sessions ?? [{ id: 1 }]).map((s) => s.id)) + 1)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, activeId }))
+    } catch {
+      // ストレージが使えない環境(プライベートブラウズ等)では永続化を諦める
+    }
+  }, [sessions, activeId])
 
   const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0]
 

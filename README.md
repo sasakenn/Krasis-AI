@@ -37,6 +37,18 @@ cd frontend && npm install
 cd frontend && npm run dev
 ```
 
+## ログイン時の自動起動(launchd)
+
+macOSのlaunchdにバックエンド/フロントエンドを登録すると、ログイン時に自動起動し、落ちたら自動再起動するようになります。
+
+```bash
+./launchd/install.sh    # 登録して起動確認まで行う
+./launchd/uninstall.sh  # 登録解除(start.sh/stop.shでの手動運用に戻る)
+```
+
+- plistは `$HOME/Library/LaunchAgents/` にコピーされます(リポジトリ内のパスをフルパスで参照するため、クローン先が異なる場合は plist 内のパスを合わせてください)。
+- ログは `logs/backend.log` / `logs/frontend.log` に出力されます(start.sh/stop.shと共通)。
+
 ## APIキーの設定
 
 `.env.example` を `.env` にコピーし、`ANTHROPIC_API_KEY` を設定してください(未設定でも `generate_outline` は簡易フォールバックで動作します)。

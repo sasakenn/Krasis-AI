@@ -190,7 +190,19 @@ body {
 .typing { color: var(--text-muted); font-style: italic; }
 
 /* --- Outline result --- */
+.result-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .result h2 { color: var(--text-primary); }
+.export-button {
+  flex-shrink: 0;
+  border: 1px solid var(--border-light);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.export-button:hover { border-color: var(--accent-blue); background: var(--bg-panel-hover); }
 .research-question { color: var(--text-secondary); font-style: italic; margin-bottom: 16px }
 .sections { display:flex; flex-direction:column; gap:14px }
 .section-card { border:1px solid var(--border); border-radius:8px; padding:14px 16px; background: var(--bg-panel) }

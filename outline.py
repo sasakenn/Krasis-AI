@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 
@@ -171,7 +171,8 @@ def generate_outline(
                 max_tokens=2000,
                 messages=[{"role": "user", "content": prompt}],
             )
-            return _parse_model_response(resp.content[0].text)
+            text_block = next(block for block in resp.content if block.type == "text")
+            return _parse_model_response(text_block.text)
         except Exception:
             return _fallback_outline(normalized_topic, field)
 

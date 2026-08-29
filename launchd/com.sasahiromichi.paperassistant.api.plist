@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.sasahiromichi.paperassistant.api</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/sasahiromichi/新規事業AI/venv/bin/python</string>
+        <string>app.py</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/sasahiromichi/新規事業AI</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/sasahiromichi/新規事業AI/venv/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- ログイン時に起動し、落ちたら自動で再起動する -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/sasahiromichi/新規事業AI/logs/backend.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/sasahiromichi/新規事業AI/logs/backend.log</string>
+</dict>
+</plist>
