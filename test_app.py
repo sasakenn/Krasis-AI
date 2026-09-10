@@ -240,6 +240,82 @@ def test_history_detail_404_for_unknown_id():
     assert resp.status_code == 404
 
 
+def test_history_delete_removes_item():
+    with patch("app.search_literature", side_effect=_fake_literature):
+        resp = client.post(
+            "/generate",
+            data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
+        )
+    generation_id = resp.json()["id"]
+
+    delete_resp = client.delete(f"/history/{generation_id}")
+    assert delete_resp.status_code == 200
+
+    assert client.get(f"/history/{generation_id}").status_code == 404
+    items = client.get("/history").json()["items"]
+    assert all(item["id"] != generation_id for item in items)
+
+
+def test_history_delete_404_for_unknown_id():
+    resp = client.delete("/history/999999999")
+    assert resp.status_code == 404
+
+
+def test_history_search_filters_by_topic_and_title():
+    with patch("app.search_literature", side_effect=_fake_literature):
+        client.post(
+            "/generate",
+            data={"topic": "検索対象トピックabc123", "field": "一般", "target_length": "1-100"},
+        )
+        client.post(
+            "/generate",
+            data={"topic": "別のテーマ", "field": "一般", "target_length": "1-100"},
+        )
+
+    resp = client.get("/history", params={"q": "abc123"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    assert all("検索対象トピックabc123" in item["topic"] for item in items)
+
+
+def test_sessions_crud_lifecycle():
+    create_resp = client.post("/sessions", json={"title": "新規タブ"})
+    assert create_resp.status_code == 200
+    session = create_resp.json()
+    assert session["title"] == "新規タブ"
+    assert session["messages"] == []
+    session_id = session["id"]
+
+    list_resp = client.get("/sessions")
+    assert list_resp.status_code == 200
+    assert any(item["id"] == session_id for item in list_resp.json()["items"])
+
+    messages = [{"role": "user", "topic": "テーマ", "field": "一般", "referenceFileNames": [], "formatFileName": None}]
+    update_resp = client.put(f"/sessions/{session_id}", json={"title": "テーマ", "messages": messages})
+    assert update_resp.status_code == 200
+
+    list_resp = client.get("/sessions")
+    updated = next(item for item in list_resp.json()["items"] if item["id"] == session_id)
+    assert updated["title"] == "テーマ"
+    assert updated["messages"] == messages
+
+    delete_resp = client.delete(f"/sessions/{session_id}")
+    assert delete_resp.status_code == 200
+    list_resp = client.get("/sessions")
+    assert all(item["id"] != session_id for item in list_resp.json()["items"])
+
+
+def test_sessions_update_404_for_unknown_id():
+    resp = client.put("/sessions/999999999", json={"title": "x", "messages": []})
+    assert resp.status_code == 404
+
+
+def test_sessions_delete_404_for_unknown_id():
+    resp = client.delete("/sessions/999999999")
+    assert resp.status_code == 404
+
+
 def test_generate_handles_corrupted_pdf_gracefully():
     captured = {}
 

@@ -81,11 +81,24 @@ curl -X POST http://127.0.0.1:8000/generate \
 `/generate` で生成に成功したアウトラインは、サーバー側のSQLite(`data/app.db`、初回起動時に自動作成)へ自動保存されます。
 
 ```bash
-curl http://127.0.0.1:8000/history            # 履歴一覧(新しい順、id/topic/field/title/created_at)
-curl http://127.0.0.1:8000/history/1          # 特定の履歴の詳細(アウトライン全体を含む)
+curl http://127.0.0.1:8000/history                       # 履歴一覧(新しい順、id/topic/field/title/created_at)
+curl "http://127.0.0.1:8000/history?q=キーワード"          # topic/titleでの部分一致検索
+curl http://127.0.0.1:8000/history/1                      # 特定の履歴の詳細(アウトライン全体を含む)
+curl -X DELETE http://127.0.0.1:8000/history/1            # 履歴の削除
 ```
 
-フロントエンドのサイドバーにも「履歴」として一覧表示され、クリックすると新しいタブでその内容を開き直せます。`data/` は`.gitignore`対象です。
+フロントエンドのサイドバーにも「履歴」として一覧表示され、検索ボックスで絞り込み、クリックすると新しいタブでその内容を開き直せます。各項目にカーソルを合わせると削除ボタンが表示されます。`data/` は`.gitignore`対象です。
+
+## タブ(セッション)の永続化
+
+チャットのタブ(セッション)はブラウザのlocalStorageではなくサーバー側SQLiteに保存されるため、別のブラウザ・別の端末から開いても同じタブ構成が復元されます。
+
+```bash
+curl http://127.0.0.1:8000/sessions                                  # タブ一覧
+curl -X POST http://127.0.0.1:8000/sessions -d '{"title":"新規タブ"}' -H 'Content-Type: application/json'
+curl -X PUT http://127.0.0.1:8000/sessions/1 -d '{"title":"...", "messages":[...]}' -H 'Content-Type: application/json'
+curl -X DELETE http://127.0.0.1:8000/sessions/1
+```
 
 ## テスト
 
@@ -96,8 +109,8 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。
+- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
-- `db.py`: 生成履歴をSQLiteに保存・参照する(`save_generation` / `list_generations` / `get_generation`)。
+- `db.py`: 生成履歴・タブ(セッション)をSQLiteに保存・参照する(`save_generation` / `list_generations` / `get_generation` / `delete_generation` / `create_session` / `list_sessions` / `update_session` / `delete_session`)。
 - `frontend/`: React(Vite)フロントエンド。Slack風のチャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。

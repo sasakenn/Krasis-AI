@@ -35,6 +35,13 @@ body {
   overflow: hidden;
 }
 
+.app-loading {
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 /* --- Top tab bar (browser-tab style) --- */
 .tabbar {
   flex-shrink: 0;
@@ -145,6 +152,16 @@ body {
   color: var(--text-muted);
   padding: 0 8px;
 }
+.sidebar-history-search {
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+.sidebar-history-search::placeholder { color: var(--text-muted); }
+.sidebar-history-search:focus { outline: none; border-color: var(--accent-blue); }
 .sidebar-history-list {
   list-style: none;
   margin: 0;
@@ -154,14 +171,22 @@ body {
   flex-direction: column;
   gap: 2px;
 }
+.sidebar-history-list li {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .sidebar-history-list button {
-  width: 100%;
   text-align: left;
   background: none;
   border: none;
   border-radius: 6px;
   padding: 6px 8px;
   cursor: pointer;
+}
+.history-item-open {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -178,6 +203,15 @@ body {
   font-size: 11px;
   color: var(--text-muted);
 }
+.history-item-delete {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.sidebar-history-list li:hover .history-item-delete { opacity: 1; }
+.history-item-delete:hover { color: var(--accent-red); background: rgba(242, 54, 69, 0.12); }
 
 /* --- Main column --- */
 .main {

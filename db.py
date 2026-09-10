@@ -39,6 +39,16 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def save_generation(topic: str, field: str, target_length: str, outline: dict) -> int:
@@ -60,17 +70,30 @@ def save_generation(topic: str, field: str, target_length: str, outline: dict) -
         return cursor.lastrowid
 
 
-def list_generations(limit: int = 50) -> list[dict]:
+def list_generations(limit: int = 50, q: str | None = None) -> list[dict]:
     with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, created_at, topic, field, target_length, title
-            FROM generations
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
+        if q and q.strip():
+            like = f"%{q.strip()}%"
+            rows = conn.execute(
+                """
+                SELECT id, created_at, topic, field, target_length, title
+                FROM generations
+                WHERE title LIKE ? OR topic LIKE ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (like, like, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, created_at, topic, field, target_length, title
+                FROM generations
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
         return [dict(row) for row in rows]
 
 
@@ -91,3 +114,48 @@ def get_generation(generation_id: int) -> dict | None:
     result = dict(row)
     result["outline"] = json.loads(result.pop("outline_json"))
     return result
+
+
+def delete_generation(generation_id: int) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM generations WHERE id = ?", (generation_id,))
+        return cursor.rowcount > 0
+
+
+def create_session(title: str) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            "INSERT INTO sessions (title, messages_json, updated_at) VALUES (?, ?, ?)",
+            (title, "[]", now),
+        )
+        return {"id": cursor.lastrowid, "title": title, "messages": [], "updated_at": now}
+
+
+def list_sessions() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT id, title, messages_json, updated_at FROM sessions ORDER BY id ASC"
+        ).fetchall()
+
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["messages"] = json.loads(item.pop("messages_json"))
+        result.append(item)
+    return result
+
+
+def update_session(session_id: int, title: str, messages: list) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE sessions SET title = ?, messages_json = ?, updated_at = ? WHERE id = ?",
+            (title, json.dumps(messages, ensure_ascii=False), datetime.now(timezone.utc).isoformat(), session_id),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_session(session_id: int) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        return cursor.rowcount > 0

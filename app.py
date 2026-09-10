@@ -1,13 +1,24 @@
 import io
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from docx import Document
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
 from pypdf import PdfReader
 
-from db import get_generation, init_db, list_generations, save_generation
+from db import (
+    create_session,
+    delete_generation,
+    delete_session,
+    get_generation,
+    init_db,
+    list_generations,
+    list_sessions,
+    save_generation,
+    update_session,
+)
 from outline import generate_outline
 from search import search_literature
 
@@ -29,6 +40,15 @@ LENGTH_OPTIONS = [
     {"key": "5001-10000", "label": "5001〜10000文字"},
 ]
 LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
+
+
+class SessionCreate(BaseModel):
+    title: str = "新規タブ"
+
+
+class SessionUpdate(BaseModel):
+    title: str
+    messages: List[Any] = []
 
 
 def _extract_pdf_text(raw: bytes) -> str:
@@ -151,8 +171,8 @@ async def generate(
 
 
 @app.get("/history")
-def history(limit: int = 50):
-    return {"items": list_generations(limit=limit)}
+def history(limit: int = 50, q: Optional[str] = None):
+    return {"items": list_generations(limit=limit, q=q)}
 
 
 @app.get("/history/{generation_id}")
@@ -161,6 +181,37 @@ def history_detail(generation_id: int):
     if record is None:
         raise HTTPException(status_code=404, detail="generation not found")
     return record
+
+
+@app.delete("/history/{generation_id}")
+def history_delete(generation_id: int):
+    if not delete_generation(generation_id):
+        raise HTTPException(status_code=404, detail="generation not found")
+    return {"status": "deleted"}
+
+
+@app.get("/sessions")
+def sessions():
+    return {"items": list_sessions()}
+
+
+@app.post("/sessions")
+def sessions_create(payload: SessionCreate):
+    return create_session(payload.title)
+
+
+@app.put("/sessions/{session_id}")
+def sessions_update(session_id: int, payload: SessionUpdate):
+    if not update_session(session_id, payload.title, payload.messages):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"status": "ok"}
+
+
+@app.delete("/sessions/{session_id}")
+def sessions_delete(session_id: int):
+    if not delete_session(session_id):
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"status": "deleted"}
 
 
 if __name__ == '__main__':

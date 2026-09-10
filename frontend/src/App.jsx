@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 
 const DEFAULT_FIELD = '一般'
 const NEW_TAB_TITLE = '新規タブ'
-const STORAGE_KEY = 'paper-assistant-sessions'
+const ACTIVE_SESSION_STORAGE_KEY = 'paper-assistant-active-session-id'
 
 function useFileDrop(onFiles) {
   return {
@@ -18,16 +18,32 @@ function makeSession(id) {
   return { id, title: NEW_TAB_TITLE, messages: [] }
 }
 
-function loadStoredSessions() {
+async function createSessionOnServer(title) {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return null
-    return parsed
+    const resp = await fetch('/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    })
+    if (!resp.ok) return null
+    return await resp.json()
   } catch {
     return null
   }
+}
+
+async function readErrorMessage(resp) {
+  const raw = await resp.text()
+  try {
+    const data = JSON.parse(raw)
+    if (typeof data?.detail === 'string') return data.detail
+    if (Array.isArray(data?.detail)) {
+      return data.detail.map((d) => d?.msg || JSON.stringify(d)).join(' / ')
+    }
+  } catch {
+    // JSON以外のレスポンス(素のテキストやHTML)はそのまま使う
+  }
+  return raw || `リクエストに失敗しました(status ${resp.status})`
 }
 
 function outlineToMarkdown(outline) {
@@ -171,7 +187,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
     if (ff) formData.append('format_file', ff)
 
     const resp = await fetch('/generate', { method: 'POST', body: formData })
-    if (!resp.ok) throw new Error(await resp.text())
+    if (!resp.ok) throw new Error(await readErrorMessage(resp))
     return resp.json()
   }
 
@@ -384,37 +400,115 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
 }
 
 export default function App() {
-  const stored = loadStoredSessions()
-  const [sessions, setSessions] = useState(stored?.sessions ?? [makeSession(1)])
-  const [activeId, setActiveId] = useState(stored?.activeId ?? stored?.sessions?.[0]?.id ?? 1)
-  const nextId = useRef(Math.max(1, ...(stored?.sessions ?? [{ id: 1 }]).map((s) => s.id)) + 1)
+  // タブ(セッション)はサーバー側SQLiteに保存し、ブラウザを変えても復元できるようにする。
+  const [sessions, setSessions] = useState([])
+  const [activeId, setActiveId] = useState(null)
+  const [sessionsLoaded, setSessionsLoaded] = useState(false)
+  const savedSnapshots = useRef({})
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ sessions, activeId }))
-    } catch {
-      // ストレージが使えない環境(プライベートブラウズ等)では永続化を諦める
+    let cancelled = false
+
+    async function loadSessions() {
+      let items = []
+      try {
+        const resp = await fetch('/sessions')
+        if (resp.ok) {
+          const data = await resp.json()
+          items = data.items ?? []
+        }
+      } catch {
+        // サーバーに接続できない場合は後段のフォールバックで単一タブとして動作する
+      }
+
+      if (items.length === 0) {
+        const created = await createSessionOnServer(NEW_TAB_TITLE)
+        items = [created ?? makeSession(1)]
+      }
+
+      if (cancelled) return
+
+      items.forEach((s) => {
+        savedSnapshots.current[s.id] = JSON.stringify({ title: s.title, messages: s.messages })
+      })
+      setSessions(items)
+
+      let storedActiveId = null
+      try {
+        storedActiveId = Number(localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY))
+      } catch {
+        // ストレージが使えない環境では無視する
+      }
+      const initial = items.find((s) => s.id === storedActiveId) ?? items[0]
+      setActiveId(initial.id)
+      setSessionsLoaded(true)
     }
-  }, [sessions, activeId])
+
+    loadSessions()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sessionsLoaded || activeId == null) return
+    try {
+      localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, String(activeId))
+    } catch {
+      // ストレージが使えない環境では永続化を諦める
+    }
+  }, [activeId, sessionsLoaded])
+
+  // messages/titleが変わったタブだけをサーバーに保存する(差分がなければ何もしない)。
+  useEffect(() => {
+    if (!sessionsLoaded) return
+    sessions.forEach((s) => {
+      const snapshot = JSON.stringify({ title: s.title, messages: s.messages })
+      if (savedSnapshots.current[s.id] === snapshot) return
+      savedSnapshots.current[s.id] = snapshot
+      fetch(`/sessions/${s.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: s.title, messages: s.messages }),
+      }).catch(() => {
+        // 保存に失敗しても致命的ではない(次の変更時に再送される)
+      })
+    })
+  }, [sessions, sessionsLoaded])
 
   const [historyItems, setHistoryItems] = useState([])
+  const [historyQuery, setHistoryQuery] = useState('')
 
-  async function refreshHistory() {
+  const fetchHistory = useCallback(async (query) => {
     try {
-      const resp = await fetch('/history')
+      const params = new URLSearchParams()
+      if (query && query.trim()) params.set('q', query.trim())
+      const resp = await fetch(`/history${params.toString() ? `?${params}` : ''}`)
       if (!resp.ok) return
       const data = await resp.json()
       setHistoryItems(data.items ?? [])
     } catch {
       // 履歴の取得に失敗しても致命的ではないので黙って諦める
     }
-  }
-
-  useEffect(() => {
-    refreshHistory()
   }, [])
 
-  const activeSession = sessions.find((s) => s.id === activeId) ?? sessions[0]
+  useEffect(() => {
+    const handle = setTimeout(() => fetchHistory(historyQuery), historyQuery ? 300 : 0)
+    return () => clearTimeout(handle)
+  }, [historyQuery, fetchHistory])
+
+  async function handleDeleteHistoryItem(e, id) {
+    e.stopPropagation()
+    if (!window.confirm('この履歴を削除しますか？')) return
+    try {
+      const resp = await fetch(`/history/${id}`, { method: 'DELETE' })
+      if (resp.ok) fetchHistory(historyQuery)
+    } catch {
+      // 削除に失敗しても致命的ではないので黙って諦める
+    }
+  }
+
+  const activeSession = sessions.find((s) => s.id === activeId)
 
   function updateSession(id, updater) {
     setSessions((prev) => prev.map((s) => (s.id === id ? updater(s) : s)))
@@ -431,10 +525,12 @@ export default function App() {
     updateSession(id, (s) => (s.title === NEW_TAB_TITLE ? { ...s, title: topic.slice(0, 20) } : s))
   }
 
-  function addTab() {
-    const id = nextId.current++
-    setSessions((prev) => [...prev, makeSession(id)])
-    setActiveId(id)
+  async function addTab() {
+    const created = await createSessionOnServer(NEW_TAB_TITLE)
+    if (!created) return
+    savedSnapshots.current[created.id] = JSON.stringify({ title: created.title, messages: created.messages })
+    setSessions((prev) => [...prev, created])
+    setActiveId(created.id)
   }
 
   async function openHistoryItem(item) {
@@ -443,38 +539,41 @@ export default function App() {
       if (!resp.ok) return
       const record = await resp.json()
 
-      const id = nextId.current++
-      setSessions((prev) => [
-        ...prev,
+      const created = await createSessionOnServer((record.title || NEW_TAB_TITLE).slice(0, 20))
+      if (!created) return
+
+      const messages = [
         {
-          id,
-          title: (record.title || NEW_TAB_TITLE).slice(0, 20),
-          messages: [
-            {
-              role: 'user',
-              topic: record.topic,
-              field: record.field,
-              referenceFileNames: [],
-              formatFileName: null,
-            },
-            { role: 'assistant', outline: record.outline },
-          ],
+          role: 'user',
+          topic: record.topic,
+          field: record.field,
+          referenceFileNames: [],
+          formatFileName: null,
         },
-      ])
-      setActiveId(id)
+        { role: 'assistant', outline: record.outline },
+      ]
+
+      // サーバー上はまだ空メッセージで作成されているので、保存済みsnapshotをずらして再保存を促す
+      savedSnapshots.current[created.id] = null
+      setSessions((prev) => [...prev, { ...created, messages }])
+      setActiveId(created.id)
     } catch {
       // 履歴の読み込みに失敗しても致命的ではないので黙って諦める
     }
   }
 
-  function closeTab(id) {
+  async function closeTab(id) {
     const index = sessions.findIndex((s) => s.id === id)
     const remaining = sessions.filter((s) => s.id !== id)
+    delete savedSnapshots.current[id]
+    fetch(`/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
 
     if (remaining.length === 0) {
-      const freshId = nextId.current++
-      setSessions([makeSession(freshId)])
-      setActiveId(freshId)
+      const created = await createSessionOnServer(NEW_TAB_TITLE)
+      const fresh = created ?? makeSession(Date.now())
+      savedSnapshots.current[fresh.id] = JSON.stringify({ title: fresh.title, messages: fresh.messages })
+      setSessions([fresh])
+      setActiveId(fresh.id)
       return
     }
 
@@ -483,6 +582,10 @@ export default function App() {
       const neighbor = remaining[Math.max(0, index - 1)] ?? remaining[0]
       setActiveId(neighbor.id)
     }
+  }
+
+  if (!sessionsLoaded || !activeSession) {
+    return <div className="app-root app-loading">読み込み中…</div>
   }
 
   return (
@@ -516,13 +619,22 @@ export default function App() {
 
           <div className="sidebar-history">
             <div className="sidebar-history-title">履歴</div>
+            <input
+              type="search"
+              className="sidebar-history-search"
+              placeholder="履歴を検索"
+              value={historyQuery}
+              onChange={(e) => setHistoryQuery(e.target.value)}
+            />
             {historyItems.length === 0 ? (
-              <div className="sidebar-history-empty">まだ生成履歴がありません</div>
+              <div className="sidebar-history-empty">
+                {historyQuery.trim() ? '該当する履歴がありません' : 'まだ生成履歴がありません'}
+              </div>
             ) : (
               <ul className="sidebar-history-list">
                 {historyItems.map((item) => (
                   <li key={item.id}>
-                    <button type="button" onClick={() => openHistoryItem(item)}>
+                    <button type="button" className="history-item-open" onClick={() => openHistoryItem(item)}>
                       <span className="history-item-title">{item.title}</span>
                       <span className="history-item-date">
                         {new Date(item.created_at).toLocaleString('ja-JP', {
@@ -532,6 +644,14 @@ export default function App() {
                           minute: '2-digit',
                         })}
                       </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="history-item-delete"
+                      title="この履歴を削除"
+                      onClick={(e) => handleDeleteHistoryItem(e, item.id)}
+                    >
+                      🗑
                     </button>
                   </li>
                 ))}
@@ -551,7 +671,7 @@ export default function App() {
             messages={activeSession.messages}
             onMessages={(updater) => setMessagesFor(activeSession.id, updater)}
             onFirstTopic={(topic) => setTitleFor(activeSession.id, topic)}
-            onGenerated={refreshHistory}
+            onGenerated={() => fetchHistory(historyQuery)}
           />
         </div>
       </div>

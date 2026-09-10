@@ -30,20 +30,81 @@ function jsonResponse(body) {
   return { ok: true, text: async () => JSON.stringify(body), json: async () => body }
 }
 
-function mockFetch({ history = { items: [] }, generateResponses = [] } = {}) {
+// /sessions への GET/POST/PUT/DELETE をインメモリで模倣する簡易フェイクバックエンド。
+function createFakeSessionsBackend(initialSessions = []) {
+  let nextId = initialSessions.reduce((max, s) => Math.max(max, s.id), 0) + 1
+  const store = new Map(initialSessions.map((s) => [s.id, { ...s }]))
+
+  return {
+    store,
+    handle(url, options = {}) {
+      const method = options.method || 'GET'
+
+      if (url === '/sessions' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ items: Array.from(store.values()) }))
+      }
+      if (url === '/sessions' && method === 'POST') {
+        const body = JSON.parse(options.body)
+        const session = { id: nextId++, title: body.title, messages: [] }
+        store.set(session.id, session)
+        return Promise.resolve(jsonResponse(session))
+      }
+
+      const match = url.match(/^\/sessions\/(\d+)$/)
+      if (match && method === 'PUT') {
+        const id = Number(match[1])
+        const body = JSON.parse(options.body)
+        store.set(id, { id, title: body.title, messages: body.messages })
+        return Promise.resolve(jsonResponse({ status: 'ok' }))
+      }
+      if (match && method === 'DELETE') {
+        store.delete(Number(match[1]))
+        return Promise.resolve(jsonResponse({ status: 'deleted' }))
+      }
+
+      return null
+    },
+  }
+}
+
+function mockFetch({ history = { items: [] }, generateResponses = [], sessions = [] } = {}) {
   let call = 0
-  global.fetch = vi.fn((url) => {
+  let historyItems = history.items.slice()
+  const sessionsBackend = createFakeSessionsBackend(sessions)
+
+  global.fetch = vi.fn((url, options = {}) => {
     if (typeof url === 'string' && url.startsWith('/history')) {
-      return Promise.resolve(jsonResponse(history))
+      const method = options.method || 'GET'
+      const deleteMatch = url.match(/^\/history\/(\d+)$/)
+
+      if (deleteMatch && method === 'DELETE') {
+        const id = Number(deleteMatch[1])
+        historyItems = historyItems.filter((item) => item.id !== id)
+        return Promise.resolve(jsonResponse({ status: 'deleted' }))
+      }
+      if (url.startsWith('/history?')) {
+        const q = decodeURIComponent(url.split('q=')[1] || '')
+        const filtered = historyItems.filter((item) => item.title.includes(q) || item.topic.includes(q))
+        return Promise.resolve(jsonResponse({ items: filtered }))
+      }
+      return Promise.resolve(jsonResponse({ items: historyItems }))
     }
+
+    if (typeof url === 'string' && url.startsWith('/sessions')) {
+      const result = sessionsBackend.handle(url, options)
+      if (result) return result
+    }
+
     const response = generateResponses[call]
     call += 1
     return Promise.resolve(response)
   })
+
+  return { sessionsBackend }
 }
 
 async function submitTopic(topic = '生成AIと教育') {
-  const textarea = screen.getByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
+  const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
   fireEvent.change(textarea, { target: { value: topic } })
   fireEvent.click(screen.getByRole('button', { name: /送信/ }))
 }
@@ -54,9 +115,9 @@ beforeEach(() => {
 })
 
 describe('App', () => {
-  it('shows the empty-state hint when there are no messages yet', () => {
+  it('shows the empty-state hint when there are no messages yet', async () => {
     render(<App />)
-    expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
   })
 
   it('asks for a target length after the first submit, then generates an outline once chosen', async () => {
@@ -75,15 +136,29 @@ describe('App', () => {
   })
 
   it('shows an error message when the request fails', async () => {
-    mockFetch({ generateResponses: [{ ok: false, text: async () => 'boom' }] })
+    mockFetch({ generateResponses: [{ ok: false, status: 500, text: async () => 'boom' }] })
 
     render(<App />)
     await submitTopic()
 
     await waitFor(() => expect(screen.getAllByText(/Error/).length).toBeGreaterThan(0))
+    expect(screen.getAllByText(/boom/).length).toBeGreaterThan(0)
   })
 
-  it('restores messages from localStorage on remount', async () => {
+  it('shows the parsed detail message when the backend returns a JSON error body', async () => {
+    mockFetch({
+      generateResponses: [
+        { ok: false, status: 400, text: async () => JSON.stringify({ detail: 'topic is required' }) },
+      ],
+    })
+
+    render(<App />)
+    await submitTopic()
+
+    await waitFor(() => expect(screen.getAllByText(/topic is required/).length).toBeGreaterThan(0))
+  })
+
+  it('restores messages from the server on remount', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
 
     const { unmount } = render(<App />)
@@ -92,21 +167,21 @@ describe('App', () => {
     unmount()
 
     render(<App />)
-    expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
     expect(screen.getAllByText('生成AIと教育').length).toBeGreaterThan(0)
   })
 
-  it('supports opening and closing tabs', () => {
+  it('supports opening and closing tabs', async () => {
     render(<App />)
-    expect(screen.getAllByText('新規タブ')).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
 
     fireEvent.click(screen.getByRole('button', { name: '＋' }))
-    const tabs = screen.getAllByText('新規タブ')
-    expect(tabs).toHaveLength(2)
+    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(2))
 
+    const tabs = screen.getAllByText('新規タブ')
     const secondTab = tabs[1].closest('.tab')
     fireEvent.click(within(secondTab).getByRole('button', { name: '×' }))
-    expect(screen.getAllByText('新規タブ')).toHaveLength(1)
+    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
   })
 
   it('lists server-side history and opens an item in a new tab', async () => {
@@ -136,5 +211,59 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getAllByText('テスト計画').length).toBeGreaterThan(0))
     expect(screen.getAllByText('過去の計画').length).toBeGreaterThan(0) // タブタイトルとしても表示される
+  })
+
+  it('searches history items by query', async () => {
+    mockFetch({
+      history: {
+        items: [
+          { id: 1, created_at: '2026-08-30T01:00:00Z', topic: '生成AIと教育', field: '一般', title: '生成AI計画' },
+          { id: 2, created_at: '2026-08-29T01:00:00Z', topic: '量子コンピュータ', field: '一般', title: '量子計画' },
+        ],
+      },
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('生成AI計画')).toBeInTheDocument())
+    expect(screen.getByText('量子計画')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByPlaceholderText('履歴を検索'), { target: { value: '量子' } })
+
+    await waitFor(() => expect(screen.queryByText('生成AI計画')).not.toBeInTheDocument())
+    expect(screen.getByText('量子計画')).toBeInTheDocument()
+  })
+
+  it('deletes a history item after confirmation', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockFetch({
+      history: {
+        items: [{ id: 7, created_at: '2026-08-30T01:00:00Z', topic: '過去のテーマ', field: '一般', title: '過去の計画' }],
+      },
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTitle('この履歴を削除'))
+
+    await waitFor(() => expect(screen.queryByText('過去の計画')).not.toBeInTheDocument())
+    confirmSpy.mockRestore()
+  })
+
+  it('keeps a history item when the deletion confirmation is cancelled', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    mockFetch({
+      history: {
+        items: [{ id: 7, created_at: '2026-08-30T01:00:00Z', topic: '過去のテーマ', field: '一般', title: '過去の計画' }],
+      },
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTitle('この履歴を削除'))
+
+    await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
+    confirmSpy.mockRestore()
   })
 })
