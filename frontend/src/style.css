@@ -213,6 +213,30 @@ body {
 .sidebar-history-list li:hover .history-item-delete { opacity: 1; }
 .history-item-delete:hover { color: var(--accent-red); background: rgba(242, 54, 69, 0.12); }
 
+/* --- サイドバー下部の設定(任意のAPIキー) --- */
+.sidebar-settings {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sidebar-settings-label {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.sidebar-settings-input {
+  border: 1px solid var(--border-light);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+.sidebar-settings-input::placeholder { color: var(--text-muted); }
+.sidebar-settings-input:focus { outline: none; border-color: var(--accent-blue); }
+
 /* --- Main column --- */
 .main {
   flex: 1;

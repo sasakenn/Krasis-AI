@@ -76,6 +76,19 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 任意で参考資料・フォーマット指定ファイルも添付できます: `-F "reference_files=@notes.txt" -F "format_file=@format.txt"`
 
+## 認証・レート制限(任意、外部公開する場合向け)
+
+デフォルト(`.env`の`API_AUTH_TOKEN`が空)ではローカル運用向けに認証なしで動作します(バックエンドは`127.0.0.1`のみにバインドされ、外部公開はしていません)。ngrok/tailscale等で外部からアクセスできるようにする場合は、`API_AUTH_TOKEN`を設定すると全APIリクエストに`X-API-Key`ヘッダーでの一致を必須にできます。
+
+```bash
+# .env
+API_AUTH_TOKEN=好きな文字列
+```
+
+設定後はフロントエンドのサイドバー下部「APIキー」欄に同じ値を入力してください(ブラウザのlocalStorageに保存され、以降のリクエストに自動で付与されます)。
+
+また、誤操作や不具合でのClaude APIコスト暴走を防ぐため、`/generate`には1分あたりのリクエスト数の簡易レート制限があります(デフォルト20件、`.env`の`GENERATE_RATE_LIMIT_PER_MINUTE`で変更、0以下で無効化)。
+
 ## 生成履歴(SQLite)
 
 `/generate` で生成に成功したアウトラインは、サーバー側のSQLite(`data/app.db`、初回起動時に自動作成)へ自動保存されます。

@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 
@@ -7,9 +8,29 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+
+# フォールバック(Claude未使用時)の検索クエリ生成に使う日英対応表。
+_JA_EN_TERMS = {
+    "生成AI": "generative AI",
+    "大学": "university",
+    "論文": "academic paper",
+    "レポート": "report",
+    "教育": "education",
+    "技術": "technology",
+    "影響": "impact",
+    "分析": "analysis",
+    "評価": "evaluation",
+    "研究": "research",
+    "プロセス": "process",
+    "方法": "method",
+}
+
+_JAPANESE_CHAR_RE = re.compile(r"[぀-んァ-ヶ一-龯]")
 
 
 def _clean_topic(topic: str) -> str:
@@ -23,32 +44,34 @@ def _guess_title(topic: str) -> str:
     return f"{clean}に関する調査計画"
 
 
-def _keywordize(topic: str) -> str:
+def _keywordize(topic: str, field: str = "") -> str:
+    """Claudeが使えない場合のフォールバック用に、日本語の題目を英語検索クエリへ変換する。
+
+    対応表(_JA_EN_TERMS)にない単語は変換できず日本語のまま残るため、変換後も
+    日本語が残っている場合はOpenAlexに投げてもノイズになるだけなので、
+    分野名(こちらも変換できた場合のみ)を使った汎用クエリにフォールバックする。
+    """
     clean = _clean_topic(topic)
     if not clean:
         return "research design and evidence synthesis"
 
-    # 日本語の文を、英語検索に使いやすい形に変換して簡略化する
-    converted = clean.replace("生成AI", "generative AI")
-    converted = converted.replace("AI", "AI")
-    converted = converted.replace("大学", "university")
-    converted = converted.replace("論文", "academic paper")
-    converted = converted.replace("レポート", "report")
-    converted = converted.replace("教育", "education")
-    converted = converted.replace("技術", "technology")
-    converted = converted.replace("影響", "impact")
-    converted = converted.replace("分析", "analysis")
-    converted = converted.replace("評価", "evaluation")
-    converted = converted.replace("研究", "research")
-    converted = converted.replace("プロセス", "process")
-    converted = converted.replace("方法", "method")
-    converted = re.sub(r"\s+", " ", converted)
+    converted = clean
+    for ja, en in _JA_EN_TERMS.items():
+        converted = converted.replace(ja, en)
+    converted = re.sub(r"\s+", " ", converted).strip()
+
+    if _JAPANESE_CHAR_RE.search(converted):
+        field_converted = _JA_EN_TERMS.get(field.strip(), field.strip())
+        if field_converted and not _JAPANESE_CHAR_RE.search(field_converted):
+            return f"{field_converted} research trends"
+        return "research design and evidence synthesis"
+
     return converted
 
 
 def _fallback_outline(topic: str, field: str = "一般") -> dict:
     clean_topic = _clean_topic(topic)
-    section_base = _keywordize(clean_topic)
+    section_base = _keywordize(clean_topic, field)
     s1 = section_base
     s2 = f"{section_base} literature review"
     s3 = f"{section_base} research framework"
@@ -174,6 +197,12 @@ def generate_outline(
             text_block = next(block for block in resp.content if block.type == "text")
             return _parse_model_response(text_block.text)
         except Exception:
+            logger.warning(
+                "Claude呼び出しに失敗したためフォールバックのアウトラインを返します(topic=%r, field=%r)",
+                normalized_topic,
+                field,
+                exc_info=True,
+            )
             return _fallback_outline(normalized_topic, field)
 
     return _fallback_outline(normalized_topic, field)

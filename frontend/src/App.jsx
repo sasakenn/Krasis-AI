@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 const DEFAULT_FIELD = '一般'
 const NEW_TAB_TITLE = '新規タブ'
 const ACTIVE_SESSION_STORAGE_KEY = 'paper-assistant-active-session-id'
+const API_KEY_STORAGE_KEY = 'paper-assistant-api-key'
 
 function useFileDrop(onFiles) {
   return {
@@ -18,9 +19,25 @@ function makeSession(id) {
   return { id, title: NEW_TAB_TITLE, messages: [] }
 }
 
+function getStoredApiKey() {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+// サーバー側でAPI_AUTH_TOKENが設定されている場合のみ、保存済みのAPIキーを
+// X-API-Keyヘッダーに付与する(未設定なら何も付けず、これまで通り動作する)。
+function apiFetch(url, options = {}) {
+  const apiKey = getStoredApiKey()
+  if (!apiKey) return fetch(url, options)
+  return fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-API-Key': apiKey } })
+}
+
 async function createSessionOnServer(title) {
   try {
-    const resp = await fetch('/sessions', {
+    const resp = await apiFetch('/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -186,7 +203,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
     rf.forEach((file) => formData.append('reference_files', file))
     if (ff) formData.append('format_file', ff)
 
-    const resp = await fetch('/generate', { method: 'POST', body: formData })
+    const resp = await apiFetch('/generate', { method: 'POST', body: formData })
     if (!resp.ok) throw new Error(await readErrorMessage(resp))
     return resp.json()
   }
@@ -400,6 +417,19 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
 }
 
 export default function App() {
+  // サーバー側でAPI_AUTH_TOKENが設定されている場合のみ必要になる任意のAPIキー。
+  const [apiKey, setApiKey] = useState(() => getStoredApiKey())
+
+  function handleApiKeyChange(value) {
+    setApiKey(value)
+    try {
+      if (value) localStorage.setItem(API_KEY_STORAGE_KEY, value)
+      else localStorage.removeItem(API_KEY_STORAGE_KEY)
+    } catch {
+      // ストレージが使えない環境では保存を諦める(このセッション内でのみ有効)
+    }
+  }
+
   // タブ(セッション)はサーバー側SQLiteに保存し、ブラウザを変えても復元できるようにする。
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -412,7 +442,7 @@ export default function App() {
     async function loadSessions() {
       let items = []
       try {
-        const resp = await fetch('/sessions')
+        const resp = await apiFetch('/sessions')
         if (resp.ok) {
           const data = await resp.json()
           items = data.items ?? []
@@ -466,7 +496,7 @@ export default function App() {
       const snapshot = JSON.stringify({ title: s.title, messages: s.messages })
       if (savedSnapshots.current[s.id] === snapshot) return
       savedSnapshots.current[s.id] = snapshot
-      fetch(`/sessions/${s.id}`, {
+      apiFetch(`/sessions/${s.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: s.title, messages: s.messages }),
@@ -483,7 +513,7 @@ export default function App() {
     try {
       const params = new URLSearchParams()
       if (query && query.trim()) params.set('q', query.trim())
-      const resp = await fetch(`/history${params.toString() ? `?${params}` : ''}`)
+      const resp = await apiFetch(`/history${params.toString() ? `?${params}` : ''}`)
       if (!resp.ok) return
       const data = await resp.json()
       setHistoryItems(data.items ?? [])
@@ -501,7 +531,7 @@ export default function App() {
     e.stopPropagation()
     if (!window.confirm('この履歴を削除しますか？')) return
     try {
-      const resp = await fetch(`/history/${id}`, { method: 'DELETE' })
+      const resp = await apiFetch(`/history/${id}`, { method: 'DELETE' })
       if (resp.ok) fetchHistory(historyQuery)
     } catch {
       // 削除に失敗しても致命的ではないので黙って諦める
@@ -535,7 +565,7 @@ export default function App() {
 
   async function openHistoryItem(item) {
     try {
-      const resp = await fetch(`/history/${item.id}`)
+      const resp = await apiFetch(`/history/${item.id}`)
       if (!resp.ok) return
       const record = await resp.json()
 
@@ -566,7 +596,7 @@ export default function App() {
     const index = sessions.findIndex((s) => s.id === id)
     const remaining = sessions.filter((s) => s.id !== id)
     delete savedSnapshots.current[id]
-    fetch(`/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
+    apiFetch(`/sessions/${id}`, { method: 'DELETE' }).catch(() => {})
 
     if (remaining.length === 0) {
       const created = await createSessionOnServer(NEW_TAB_TITLE)
@@ -657,6 +687,20 @@ export default function App() {
                 ))}
               </ul>
             )}
+          </div>
+
+          <div className="sidebar-settings">
+            <label className="sidebar-settings-label" htmlFor="api-key-input">
+              APIキー(サーバーで必須の場合のみ)
+            </label>
+            <input
+              id="api-key-input"
+              type="password"
+              className="sidebar-settings-input"
+              placeholder="未設定なら空のままでOK"
+              value={apiKey}
+              onChange={(e) => handleApiKeyChange(e.target.value)}
+            />
           </div>
         </aside>
 

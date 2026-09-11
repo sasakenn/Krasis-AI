@@ -1,10 +1,12 @@
 import io
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, List, Optional
+from threading import Lock
+from typing import Any, Dict, List, Optional, Tuple
 
 from docx import Document
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 from pypdf import PdfReader
 
@@ -40,6 +42,38 @@ LENGTH_OPTIONS = [
     {"key": "5001-10000", "label": "5001〜10000文字"},
 ]
 LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
+
+# 空のままなら認証なし(ローカル運用のデフォルト)。値を設定すると、
+# 全APIリクエストに X-API-Key ヘッダーでの一致を必須にする(外部公開時向け)。
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
+
+# /generate 1件あたりClaude APIを呼ぶため、誤操作や不具合でのコスト暴走を防ぐための
+# 簡易レート制限(1分あたりの上限リクエスト数)。0以下で無効化。
+GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
+
+_rate_limit_lock = Lock()
+_rate_limit_state: Dict[str, Tuple[int, int]] = {}
+
+
+def require_api_key(x_api_key: Optional[str] = Header(default=None)):
+    if API_AUTH_TOKEN and x_api_key != API_AUTH_TOKEN:
+        raise HTTPException(status_code=401, detail="invalid or missing API key")
+
+
+def _enforce_generate_rate_limit(key: str) -> None:
+    if GENERATE_RATE_LIMIT_PER_MINUTE <= 0:
+        return
+
+    window = int(time.time() // 60)
+    with _rate_limit_lock:
+        window_start, count = _rate_limit_state.get(key, (window, 0))
+        if window_start != window:
+            window_start, count = window, 0
+        count += 1
+        _rate_limit_state[key] = (window_start, count)
+
+    if count > GENERATE_RATE_LIMIT_PER_MINUTE:
+        raise HTTPException(status_code=429, detail="generateのレート制限を超えました。しばらく待って再試行してください。")
 
 
 class SessionCreate(BaseModel):
@@ -131,14 +165,20 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/generate")
+@app.post("/generate", dependencies=[Depends(require_api_key)])
 async def generate(
+    request: Request,
     topic: str = Form(...),
     field: str = Form("一般"),
     target_length: Optional[str] = Form(default=None),
     reference_files: Optional[List[UploadFile]] = File(default=None),
     format_file: Optional[UploadFile] = File(default=None),
 ):
+    rate_limit_key = request.headers.get("x-api-key") or (
+        request.client.host if request.client else "unknown"
+    )
+    _enforce_generate_rate_limit(rate_limit_key)
+
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
 
@@ -170,12 +210,12 @@ async def generate(
     return outline
 
 
-@app.get("/history")
+@app.get("/history", dependencies=[Depends(require_api_key)])
 def history(limit: int = 50, q: Optional[str] = None):
     return {"items": list_generations(limit=limit, q=q)}
 
 
-@app.get("/history/{generation_id}")
+@app.get("/history/{generation_id}", dependencies=[Depends(require_api_key)])
 def history_detail(generation_id: int):
     record = get_generation(generation_id)
     if record is None:
@@ -183,31 +223,31 @@ def history_detail(generation_id: int):
     return record
 
 
-@app.delete("/history/{generation_id}")
+@app.delete("/history/{generation_id}", dependencies=[Depends(require_api_key)])
 def history_delete(generation_id: int):
     if not delete_generation(generation_id):
         raise HTTPException(status_code=404, detail="generation not found")
     return {"status": "deleted"}
 
 
-@app.get("/sessions")
+@app.get("/sessions", dependencies=[Depends(require_api_key)])
 def sessions():
     return {"items": list_sessions()}
 
 
-@app.post("/sessions")
+@app.post("/sessions", dependencies=[Depends(require_api_key)])
 def sessions_create(payload: SessionCreate):
     return create_session(payload.title)
 
 
-@app.put("/sessions/{session_id}")
+@app.put("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
 def sessions_update(session_id: int, payload: SessionUpdate):
     if not update_session(session_id, payload.title, payload.messages):
         raise HTTPException(status_code=404, detail="session not found")
     return {"status": "ok"}
 
 
-@app.delete("/sessions/{session_id}")
+@app.delete("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
 def sessions_delete(session_id: int):
     if not delete_session(session_id):
         raise HTTPException(status_code=404, detail="session not found")

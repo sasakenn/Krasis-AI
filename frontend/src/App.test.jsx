@@ -266,4 +266,31 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
     confirmSpy.mockRestore()
   })
+
+  it('sends the saved API key as an X-API-Key header once entered', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText(/APIキー/), { target: { value: 'my-secret-key' } })
+
+    await submitTopic()
+
+    await waitFor(() => {
+      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
+      expect(generateCall).toBeTruthy()
+      expect(generateCall[1].headers['X-API-Key']).toBe('my-secret-key')
+    })
+    expect(localStorage.getItem('paper-assistant-api-key')).toBe('my-secret-key')
+  })
+
+  it('does not send an X-API-Key header when no key is set', async () => {
+    render(<App />)
+    await submitTopic()
+
+    await waitFor(() => {
+      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
+      expect(generateCall).toBeTruthy()
+      expect(generateCall[1].headers?.['X-API-Key']).toBeUndefined()
+    })
+  })
 })

@@ -4,6 +4,7 @@ from unittest.mock import patch
 from docx import Document
 from fastapi.testclient import TestClient
 
+import app as app_module
 from app import app
 
 client = TestClient(app)
@@ -314,6 +315,52 @@ def test_sessions_update_404_for_unknown_id():
 def test_sessions_delete_404_for_unknown_id():
     resp = client.delete("/sessions/999999999")
     assert resp.status_code == 404
+
+
+def test_api_key_not_required_by_default():
+    resp = client.get("/history")
+    assert resp.status_code == 200
+
+
+def test_generate_and_history_require_api_key_when_configured(monkeypatch):
+    monkeypatch.setattr(app_module, "API_AUTH_TOKEN", "secret-token")
+
+    assert client.get("/history").status_code == 401
+    assert client.post("/generate", data={"topic": "x", "target_length": "1-100"}).status_code == 401
+
+    ok = client.post(
+        "/generate",
+        data={"topic": "x", "target_length": "1-100"},
+        headers={"X-API-Key": "secret-token"},
+    )
+    assert ok.status_code == 200
+    assert client.get("/history", headers={"X-API-Key": "secret-token"}).status_code == 200
+
+
+def test_sessions_require_api_key_when_configured(monkeypatch):
+    monkeypatch.setattr(app_module, "API_AUTH_TOKEN", "secret-token")
+
+    assert client.get("/sessions").status_code == 401
+    assert client.post("/sessions", json={"title": "x"}).status_code == 401
+    assert client.get("/sessions", headers={"X-API-Key": "secret-token"}).status_code == 200
+
+
+def test_generate_rate_limit_returns_429_when_exceeded(monkeypatch):
+    monkeypatch.setattr(app_module, "GENERATE_RATE_LIMIT_PER_MINUTE", 1)
+
+    first = client.post("/generate", data={"topic": "レート制限テスト1", "target_length": "1-100"})
+    assert first.status_code == 200
+
+    second = client.post("/generate", data={"topic": "レート制限テスト2", "target_length": "1-100"})
+    assert second.status_code == 429
+
+
+def test_generate_rate_limit_disabled_when_zero(monkeypatch):
+    monkeypatch.setattr(app_module, "GENERATE_RATE_LIMIT_PER_MINUTE", 0)
+
+    for _ in range(3):
+        resp = client.post("/generate", data={"topic": "レート制限無効テスト", "target_length": "1-100"})
+        assert resp.status_code == 200
 
 
 def test_generate_handles_corrupted_pdf_gracefully():
