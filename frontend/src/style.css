@@ -514,7 +514,7 @@ body {
 
 .error { color: var(--accent-red); margin-top: 8px; font-size: 13px; }
 
-/* --- Rainbow glow while typing in composer --- */
+/* --- Monochrome glow while typing in composer(回転なし、白黒の明滅のみ) --- */
 .composer.composer-focused {
   position: relative;
   z-index: 0;
@@ -528,33 +528,27 @@ body {
   inset: 0;
   padding: 2px; /* thickness of the glowing border */
   border-radius: 10px;
-  background: conic-gradient(from 0deg, #ff3b30, #ff9500, #ffcc00, #4cd964, #5ac8fa, #007aff, #5856d6, #ff2d55, #ff3b30);
+  background: linear-gradient(135deg, #ffffff, #6b6b6b, #ffffff);
   -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
   pointer-events: none;
-  animation: rainbow-rotate 3s linear infinite;
-  opacity: 0.95;
+  animation: mono-glow-pulse 2.2s ease-in-out infinite;
 }
 
-@keyframes rainbow-rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+@keyframes mono-glow-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
 }
 
-/* Fallback/simple animated border color for environments that don't support mask composite */
-@keyframes rainbow-border {
-  0%   { border-color: #ff3b30; }
-  16%  { border-color: #ff9500; }
-  33%  { border-color: #ffcc00; }
-  50%  { border-color: #4cd964; }
-  66%  { border-color: #5ac8fa; }
-  83%  { border-color: #007aff; }
-  100% { border-color: #ff3b30; }
+/* Fallback/simple animated border brightness for environments that don't support mask composite */
+@keyframes mono-border-pulse {
+  0%, 100% { border-color: #4a4a4a; }
+  50% { border-color: #ffffff; }
 }
 
 .composer.composer-focused .attach-box,
 .composer.composer-focused .prompt-box {
-  animation: rainbow-border 2.5s linear infinite;
-  box-shadow: 0 0 10px rgba(0,0,0,0.04) inset;
+  animation: mono-border-pulse 2.2s ease-in-out infinite;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.18) inset;
 }
