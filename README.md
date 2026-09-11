@@ -76,18 +76,34 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 任意で参考資料・フォーマット指定ファイルも添付できます: `-F "reference_files=@notes.txt" -F "format_file=@format.txt"`
 
-## 認証・レート制限(任意、外部公開する場合向け)
+## 認証(Sign in with Apple) — マルチユーザー対応
 
-デフォルト(`.env`の`API_AUTH_TOKEN`が空)ではローカル運用向けに認証なしで動作します(バックエンドは`127.0.0.1`のみにバインドされ、外部公開はしていません)。ngrok/tailscale等で外部からアクセスできるようにする場合は、`API_AUTH_TOKEN`を設定すると全APIリクエストに`X-API-Key`ヘッダーでの一致を必須にできます。
+App Store公開を見据え、認証はSign in with Appleに一本化されています。`/generate` `/history*` `/sessions*` はすべて `Authorization: Bearer <token>` を要求し、`generations` / `sessions` はDB上でuser_idごとに分離されます(他人のデータは一覧にも出ないし、直接IDを指定しても404になります)。
+
+**トークンの取得**: `POST /auth/apple` に `{"identity_token": "<Sign in with Appleが返すidentity token>"}` を送ると、以後のAPIで使うアプリ独自のセッショントークン(30日有効)が返ります。これを利用するには `.env` に以下を設定する必要があります(Apple Developer Program登録後、Apple Developer portalで取得):
 
 ```bash
 # .env
-API_AUTH_TOKEN=好きな文字列
+APPLE_CLIENT_ID=your.services.id
+JWT_SECRET=$(openssl rand -hex 32)   # 生成例
 ```
 
-設定後はフロントエンドのサイドバー下部「APIキー」欄に同じ値を入力してください(ブラウザのlocalStorageに保存され、以降のリクエストに自動で付与されます)。
+**⚠️ フロントエンド(`frontend/`)は現時点でSign in with Appleに未対応です**。ネイティブのSign in with Appleフローは、iOSアプリ化(Capacitor)のタイミングで実装する計画のため、現状ブラウザ版のUIから`/generate`等を呼ぶと401になります。
 
-また、誤操作や不具合でのClaude APIコスト暴走を防ぐため、`/generate`には1分あたりのリクエスト数の簡易レート制限があります(デフォルト20件、`.env`の`GENERATE_RATE_LIMIT_PER_MINUTE`で変更、0以下で無効化)。
+**ローカルでの動作確認**: `.env` に `DEV_BYPASS_USER_ID` を設定すると、`X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってAPIを直接(curl等で)叩けます。**本番環境では絶対に設定しないこと**(誰でも他人になりすませてしまう)。
+
+```bash
+# .env(ローカル開発用)
+DEV_BYPASS_USER_ID=local-dev-user
+```
+
+```bash
+curl http://127.0.0.1:8000/history -H "X-Dev-User-Id: local-dev-user"
+```
+
+なお、user_id列の追加前に作成された既存データは、`legacy-local-user` という固定IDの所有として自動的に引き継がれます(`db.py`の`init_db()`が起動時に一度だけマイグレーションする)。
+
+また、誤操作や不具合でのClaude APIコスト暴走を防ぐため、`/generate`にはユーザーごとに1分あたりのリクエスト数の簡易レート制限があります(デフォルト20件、`.env`の`GENERATE_RATE_LIMIT_PER_MINUTE`で変更、0以下で無効化)。
 
 ## 生成履歴(SQLite)
 
@@ -134,8 +150,18 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `app.py`: Web API(`/auth/apple`, `/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `auth.py`: Sign in with Apple の identity token 検証と、アプリ独自セッションJWTの発行・検証(`verify_apple_identity_token` / `create_app_token` / `decode_app_token`)。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
-- `db.py`: 生成履歴・タブ(セッション)をSQLiteに保存・参照する(`save_generation` / `list_generations` / `get_generation` / `delete_generation` / `create_session` / `list_sessions` / `update_session` / `delete_session`)。
-- `frontend/`: React(Vite)フロントエンド。Slack風のチャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。
+- `db.py`: ユーザー・生成履歴・タブ(セッション)をSQLiteに保存・参照する(`upsert_user` / `save_generation` / `list_generations` / `get_generation` / `delete_generation` / `create_session` / `list_sessions` / `update_session` / `delete_session`)。すべてuser_idでスコープされる。
+- `frontend/`: React(Vite)フロントエンド。Slack風のチャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。**現時点ではSign in with Apple未対応**(上記「認証」セクション参照)。
+
+## App Store公開に向けたロードマップ
+
+今回実装したのはマルチユーザー化 + Sign in with Apple検証という土台部分のみ。残りは以下の順で進める想定:
+
+- サブスク課金(App Store Server Notifications V2・エンタイトルメント管理・`/generate`のゲート)
+- クラウドへの常時デプロイ(Dockerfile・ホスティング・HTTPS)
+- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブSign in with Apple・StoreKit)
+- Apple Developer Program登録・App Store Connectでのアプリ/課金商品登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)

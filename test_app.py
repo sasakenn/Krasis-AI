@@ -6,8 +6,13 @@ from fastapi.testclient import TestClient
 
 import app as app_module
 from app import app
+from conftest import DEFAULT_TEST_USER_ID
 
 client = TestClient(app)
+# DEV_BYPASS_USER_ID(conftest.pyで設定済み)経由で、各テストのリクエストは
+# デフォルトで同じテストユーザーとして認証される。未認証/別ユーザーの挙動を
+# 確認したいテストだけ、個別にヘッダーを上書き・削除する。
+client.headers["X-Dev-User-Id"] = DEFAULT_TEST_USER_ID
 
 
 def _build_minimal_pdf(text: str) -> bytes:
@@ -317,32 +322,86 @@ def test_sessions_delete_404_for_unknown_id():
     assert resp.status_code == 404
 
 
-def test_api_key_not_required_by_default():
-    resp = client.get("/history")
+def test_endpoints_require_auth_when_dev_bypass_disabled(monkeypatch):
+    monkeypatch.setattr(app_module, "DEV_BYPASS_USER_ID", "")
+
+    assert client.get("/history", headers={"X-Dev-User-Id": ""}).status_code == 401
+    assert client.get("/sessions", headers={"X-Dev-User-Id": ""}).status_code == 401
+    assert (
+        client.post(
+            "/generate", data={"topic": "x", "target_length": "1-100"}, headers={"X-Dev-User-Id": ""}
+        ).status_code
+        == 401
+    )
+
+
+def test_missing_bearer_token_is_rejected():
+    resp = client.get(
+        "/history", headers={"Authorization": "not-a-bearer-token", "X-Dev-User-Id": ""}
+    )
+    assert resp.status_code == 401
+
+
+def test_apple_sign_in_issues_bearer_token_that_grants_access(monkeypatch):
+    monkeypatch.setattr(app_module, "verify_apple_identity_token", lambda token: {
+        "sub": "apple-user-456",
+        "email": "new-user@example.com",
+    })
+
+    signin_resp = client.post("/auth/apple", json={"identity_token": "fake-token-body"})
+    assert signin_resp.status_code == 200
+    token = signin_resp.json()["token"]
+    assert token
+
+    resp = client.get(
+        "/history",
+        headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""},
+    )
     assert resp.status_code == 200
 
 
-def test_generate_and_history_require_api_key_when_configured(monkeypatch):
-    monkeypatch.setattr(app_module, "API_AUTH_TOKEN", "secret-token")
+def test_apple_sign_in_rejects_invalid_token(monkeypatch):
+    from auth import AuthError
 
-    assert client.get("/history").status_code == 401
-    assert client.post("/generate", data={"topic": "x", "target_length": "1-100"}).status_code == 401
+    def _raise(_token):
+        raise AuthError("boom")
 
-    ok = client.post(
-        "/generate",
-        data={"topic": "x", "target_length": "1-100"},
-        headers={"X-API-Key": "secret-token"},
-    )
-    assert ok.status_code == 200
-    assert client.get("/history", headers={"X-API-Key": "secret-token"}).status_code == 200
+    monkeypatch.setattr(app_module, "verify_apple_identity_token", _raise)
+
+    resp = client.post("/auth/apple", json={"identity_token": "garbage"})
+    assert resp.status_code == 401
 
 
-def test_sessions_require_api_key_when_configured(monkeypatch):
-    monkeypatch.setattr(app_module, "API_AUTH_TOKEN", "secret-token")
+def test_users_cannot_see_or_modify_each_others_data():
+    other_user_headers = {"X-Dev-User-Id": "someone-else"}
 
-    assert client.get("/sessions").status_code == 401
-    assert client.post("/sessions", json={"title": "x"}).status_code == 401
-    assert client.get("/sessions", headers={"X-API-Key": "secret-token"}).status_code == 200
+    with patch("app.search_literature", side_effect=_fake_literature):
+        resp = client.post(
+            "/generate",
+            data={"topic": "他人に見せたくないテーマ", "field": "一般", "target_length": "1-100"},
+        )
+    generation_id = resp.json()["id"]
+
+    session_resp = client.post("/sessions", json={"title": "自分のタブ"})
+    session_id = session_resp.json()["id"]
+
+    # 別ユーザーからは、存在自体が見えない(404)
+    assert client.get(f"/history/{generation_id}", headers=other_user_headers).status_code == 404
+    assert client.delete(f"/history/{generation_id}", headers=other_user_headers).status_code == 404
+    assert client.put(
+        f"/sessions/{session_id}", json={"title": "乗っ取り", "messages": []}, headers=other_user_headers
+    ).status_code == 404
+    assert client.delete(f"/sessions/{session_id}", headers=other_user_headers).status_code == 404
+
+    # 一覧にも他人のデータは混ざらない
+    other_history = client.get("/history", headers=other_user_headers).json()["items"]
+    assert all(item["id"] != generation_id for item in other_history)
+    other_sessions = client.get("/sessions", headers=other_user_headers).json()["items"]
+    assert all(item["id"] != session_id for item in other_sessions)
+
+    # 元のユーザーからは引き続きアクセスできる
+    assert client.get(f"/history/{generation_id}").status_code == 200
+    assert client.get("/sessions").json()["items"]
 
 
 def test_generate_rate_limit_returns_429_when_exceeded(monkeypatch):

@@ -6,11 +6,12 @@ from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
 from docx import Document
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pypdf import PdfReader
 
+from auth import AuthError, create_app_token, decode_app_token, verify_apple_identity_token
 from db import (
     create_session,
     delete_generation,
@@ -21,6 +22,7 @@ from db import (
     list_sessions,
     save_generation,
     update_session,
+    upsert_user,
 )
 from outline import generate_outline
 from search import search_literature
@@ -44,21 +46,39 @@ LENGTH_OPTIONS = [
 ]
 LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
 
-# 空のままなら認証なし(ローカル運用のデフォルト)。値を設定すると、
-# 全APIリクエストに X-API-Key ヘッダーでの一致を必須にする(外部公開時向け)。
-API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN", "").strip()
+# 開発時のみ: この値を設定すると、Sign in with Appleを経ずに
+# `X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってアクセスできる。
+# 本番環境では絶対に設定しないこと(誰でも他人になりすませてしまう)。
+DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
 
 # /generate 1件あたりClaude APIを呼ぶため、誤操作や不具合でのコスト暴走を防ぐための
-# 簡易レート制限(1分あたりの上限リクエスト数)。0以下で無効化。
+# 簡易レート制限(ユーザーごとの1分あたりの上限リクエスト数)。0以下で無効化。
 GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
 
 _rate_limit_lock = Lock()
 _rate_limit_state: Dict[str, Tuple[int, int]] = {}
 
 
-def require_api_key(x_api_key: Optional[str] = Header(default=None)):
-    if API_AUTH_TOKEN and x_api_key != API_AUTH_TOKEN:
-        raise HTTPException(status_code=401, detail="invalid or missing API key")
+def get_current_user(
+    authorization: Optional[str] = Header(default=None),
+    x_dev_user_id: Optional[str] = Header(default=None),
+) -> str:
+    """Bearerトークン(アプリ独自のセッションJWT)を検証し、user_idを返す。
+
+    DEV_BYPASS_USER_ID が設定されている開発環境に限り、X-Dev-User-Id ヘッダーで
+    Sign in with Appleを経ずにuser_idを直接指定できる(ローカルでの動作確認用)。
+    """
+    if DEV_BYPASS_USER_ID and x_dev_user_id:
+        return x_dev_user_id
+
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="missing bearer token")
+
+    token = authorization[len("Bearer "):].strip()
+    try:
+        return decode_app_token(token)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 def _enforce_generate_rate_limit(key: str) -> None:
@@ -75,6 +95,10 @@ def _enforce_generate_rate_limit(key: str) -> None:
 
     if count > GENERATE_RATE_LIMIT_PER_MINUTE:
         raise HTTPException(status_code=429, detail="generateのレート制限を超えました。しばらく待って再試行してください。")
+
+
+class AppleSignInRequest(BaseModel):
+    identity_token: str
 
 
 class SessionCreate(BaseModel):
@@ -166,19 +190,27 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/generate", dependencies=[Depends(require_api_key)])
+@app.post("/auth/apple")
+def auth_apple(payload: AppleSignInRequest):
+    try:
+        claims = verify_apple_identity_token(payload.identity_token)
+        upsert_user(claims["sub"], claims.get("email"))
+        token = create_app_token(claims["sub"])
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return {"token": token}
+
+
+@app.post("/generate")
 async def generate(
-    request: Request,
     topic: str = Form(...),
     field: str = Form("一般"),
     target_length: Optional[str] = Form(default=None),
     reference_files: Optional[List[UploadFile]] = File(default=None),
     format_file: Optional[UploadFile] = File(default=None),
+    user_id: str = Depends(get_current_user),
 ):
-    rate_limit_key = request.headers.get("x-api-key") or (
-        request.client.host if request.client else "unknown"
-    )
-    _enforce_generate_rate_limit(rate_limit_key)
+    _enforce_generate_rate_limit(user_id)
 
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
@@ -207,50 +239,50 @@ async def generate(
     outline = generate_outline(topic, field, reference_notes, format_notes, target_length)
     outline = _attach_literature(outline)
     outline["type"] = "outline"
-    outline["id"] = save_generation(topic, field, target_length, outline)
+    outline["id"] = save_generation(user_id, topic, field, target_length, outline)
     return outline
 
 
-@app.get("/history", dependencies=[Depends(require_api_key)])
-def history(limit: int = 50, q: Optional[str] = None):
-    return {"items": list_generations(limit=limit, q=q)}
+@app.get("/history")
+def history(limit: int = 50, q: Optional[str] = None, user_id: str = Depends(get_current_user)):
+    return {"items": list_generations(user_id, limit=limit, q=q)}
 
 
-@app.get("/history/{generation_id}", dependencies=[Depends(require_api_key)])
-def history_detail(generation_id: int):
-    record = get_generation(generation_id)
+@app.get("/history/{generation_id}")
+def history_detail(generation_id: int, user_id: str = Depends(get_current_user)):
+    record = get_generation(user_id, generation_id)
     if record is None:
         raise HTTPException(status_code=404, detail="generation not found")
     return record
 
 
-@app.delete("/history/{generation_id}", dependencies=[Depends(require_api_key)])
-def history_delete(generation_id: int):
-    if not delete_generation(generation_id):
+@app.delete("/history/{generation_id}")
+def history_delete(generation_id: int, user_id: str = Depends(get_current_user)):
+    if not delete_generation(user_id, generation_id):
         raise HTTPException(status_code=404, detail="generation not found")
     return {"status": "deleted"}
 
 
-@app.get("/sessions", dependencies=[Depends(require_api_key)])
-def sessions():
-    return {"items": list_sessions()}
+@app.get("/sessions")
+def sessions(user_id: str = Depends(get_current_user)):
+    return {"items": list_sessions(user_id)}
 
 
-@app.post("/sessions", dependencies=[Depends(require_api_key)])
-def sessions_create(payload: SessionCreate):
-    return create_session(payload.title)
+@app.post("/sessions")
+def sessions_create(payload: SessionCreate, user_id: str = Depends(get_current_user)):
+    return create_session(user_id, payload.title)
 
 
-@app.put("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
-def sessions_update(session_id: int, payload: SessionUpdate):
-    if not update_session(session_id, payload.title, payload.messages):
+@app.put("/sessions/{session_id}")
+def sessions_update(session_id: int, payload: SessionUpdate, user_id: str = Depends(get_current_user)):
+    if not update_session(user_id, session_id, payload.title, payload.messages):
         raise HTTPException(status_code=404, detail="session not found")
     return {"status": "ok"}
 
 
-@app.delete("/sessions/{session_id}", dependencies=[Depends(require_api_key)])
-def sessions_delete(session_id: int):
-    if not delete_session(session_id):
+@app.delete("/sessions/{session_id}")
+def sessions_delete(session_id: int, user_id: str = Depends(get_current_user)):
+    if not delete_session(user_id, session_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"status": "deleted"}
 
