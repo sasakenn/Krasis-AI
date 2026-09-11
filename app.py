@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from docx import Document
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pypdf import PdfReader
 
@@ -252,6 +253,14 @@ def sessions_delete(session_id: int):
     if not delete_session(session_id):
         raise HTTPException(status_code=404, detail="session not found")
     return {"status": "deleted"}
+
+
+# `cd frontend && npm run build` 済みなら、Viteの開発用プロキシ(devサーバー限定)なしでも
+# バックエンドと同一オリジンで配信できるように静的ファイルとしてマウントする。
+# ビルドしていない開発時はこのディレクトリが存在しないため何もしない(devサーバー+プロキシ運用のまま)。
+_FRONTEND_DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+if os.path.isdir(_FRONTEND_DIST_DIR):
+    app.mount("/", StaticFiles(directory=_FRONTEND_DIST_DIR, html=True), name="frontend")
 
 
 if __name__ == '__main__':

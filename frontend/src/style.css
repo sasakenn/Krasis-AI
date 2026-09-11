@@ -42,6 +42,31 @@ body {
   font-size: 14px;
 }
 
+/* --- タブ読み込み/保存・履歴取得などの裏側フェッチ失敗を知らせる帯 --- */
+.global-error {
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(242, 54, 69, 0.12);
+  border-bottom: 1px solid rgba(242, 54, 69, 0.4);
+  color: var(--accent-red);
+  padding: 8px 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.global-error-dismiss {
+  border: none;
+  background: none;
+  color: var(--accent-red);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  flex-shrink: 0;
+}
+
 /* --- Top tab bar (browser-tab style) --- */
 .tabbar {
   flex-shrink: 0;

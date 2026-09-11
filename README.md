@@ -113,6 +113,18 @@ curl -X PUT http://127.0.0.1:8000/sessions/1 -d '{"title":"...", "messages":[...
 curl -X DELETE http://127.0.0.1:8000/sessions/1
 ```
 
+## 本番ビルドを単一プロセスで配信する場合
+
+開発時は`./start.sh`でViteの開発サーバー(:5173、`/generate`等はプロキシ設定でバックエンドへ転送)を使いますが、フロントエンドをビルド済みにすれば、バックエンド(:8000)単体でAPIと画面の両方を同一オリジンから配信できます(devサーバーやリバースプロキシ不要)。
+
+```bash
+cd frontend && npm run build   # frontend/dist/ が作られる
+cd .. && ./venv/bin/python app.py
+# → http://127.0.0.1:8000/ を開くとAPIと画面が両方この1プロセスから配信される
+```
+
+`frontend/dist/`が存在しない場合(通常の開発時)は何も変わらず、これまで通りVite開発サーバー経由での利用になります。
+
 ## テスト
 
 ```bash
@@ -122,7 +134,7 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。
+- `app.py`: Web API(`/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
 - `db.py`: 生成履歴・タブ(セッション)をSQLiteに保存・参照する(`save_generation` / `list_generations` / `get_generation` / `delete_generation` / `create_session` / `list_sessions` / `update_session` / `delete_session`)。

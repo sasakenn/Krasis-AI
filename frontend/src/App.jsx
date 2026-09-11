@@ -154,7 +154,7 @@ function LengthQuestion({ question, onChoose }) {
   )
 }
 
-function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
+function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyChange }) {
   const [topic, setTopic] = useState('')
   const [field, setField] = useState(DEFAULT_FIELD)
   const [referenceFiles, setReferenceFiles] = useState([])
@@ -167,6 +167,24 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
 
   const referenceInputRef = useRef(null)
   const formatInputRef = useRef(null)
+
+  // 送信前のテーマ入力・添付ファイルはこのコンポーネントのローカルstateにしか無く、
+  // タブ切り替えやページ再読み込みで消えてしまうため、呼び出し元に「未送信の入力がある」ことを伝える。
+  const isDirty = Boolean(topic.trim()) || referenceFiles.length > 0 || Boolean(formatFile)
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty)
+  }, [isDirty, onDirtyChange])
+
+  useEffect(() => {
+    function handleBeforeUnload(e) {
+      if (!isDirty) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [isDirty])
 
   function addReferenceFiles(fileList) {
     const incoming = Array.from(fileList)
@@ -370,13 +388,27 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated }) {
             {referenceFiles.map((f, i) => (
               <span className="chip" key={`rf-${i}`}>
                 📎 {f.name}
-                <button type="button" className="chip-remove" onClick={() => removeReferenceFile(i)}>×</button>
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`${f.name}を添付から削除`}
+                  onClick={() => removeReferenceFile(i)}
+                >
+                  ×
+                </button>
               </span>
             ))}
             {formatFile && (
               <span className="chip">
                 📐 {formatFile.name}
-                <button type="button" className="chip-remove" onClick={() => setFormatFile(null)}>×</button>
+                <button
+                  type="button"
+                  className="chip-remove"
+                  aria-label={`${formatFile.name}を添付から削除`}
+                  onClick={() => setFormatFile(null)}
+                >
+                  ×
+                </button>
               </span>
             )}
           </div>
@@ -430,6 +462,19 @@ export default function App() {
     }
   }
 
+  // サイドバー系の裏側フェッチ(履歴・タブの読み込み/保存)は失敗しても画面が壊れないように
+  // 個別にcatchしているが、原因(APIキー誤り・サーバー未接続など)が分かるようここに表示する。
+  const [sidebarError, setSidebarError] = useState(null)
+
+  // 未送信のテーマ・添付ファイルがある状態でタブを切り替えると内容が消えるため、
+  // Workspaceから「未送信の入力がある」ことを受け取り、切り替え前に確認する。
+  const [composerDirty, setComposerDirty] = useState(false)
+
+  function confirmDiscardComposerIfNeeded() {
+    if (!composerDirty) return true
+    return window.confirm('入力中のテーマや添付ファイル(未送信)は失われます。このまま続けますか？')
+  }
+
   // タブ(セッション)はサーバー側SQLiteに保存し、ブラウザを変えても復元できるようにする。
   const [sessions, setSessions] = useState([])
   const [activeId, setActiveId] = useState(null)
@@ -446,9 +491,12 @@ export default function App() {
         if (resp.ok) {
           const data = await resp.json()
           items = data.items ?? []
+        } else {
+          setSidebarError(`タブの読み込みに失敗しました: ${await readErrorMessage(resp)}`)
         }
-      } catch {
+      } catch (err) {
         // サーバーに接続できない場合は後段のフォールバックで単一タブとして動作する
+        setSidebarError(`タブの読み込みに失敗しました: ${String(err)}`)
       }
 
       if (items.length === 0) {
@@ -500,9 +548,16 @@ export default function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: s.title, messages: s.messages }),
-      }).catch(() => {
-        // 保存に失敗しても致命的ではない(次の変更時に再送される)
       })
+        .then(async (resp) => {
+          if (!resp.ok) {
+            setSidebarError(`タブの保存に失敗しました: ${await readErrorMessage(resp)}`)
+          }
+        })
+        .catch((err) => {
+          // 保存に失敗しても画面は止めない(次の変更時に再送される)が、原因は表示する
+          setSidebarError(`タブの保存に失敗しました: ${String(err)}`)
+        })
     })
   }, [sessions, sessionsLoaded])
 
@@ -514,11 +569,14 @@ export default function App() {
       const params = new URLSearchParams()
       if (query && query.trim()) params.set('q', query.trim())
       const resp = await apiFetch(`/history${params.toString() ? `?${params}` : ''}`)
-      if (!resp.ok) return
+      if (!resp.ok) {
+        setSidebarError(`履歴の取得に失敗しました: ${await readErrorMessage(resp)}`)
+        return
+      }
       const data = await resp.json()
       setHistoryItems(data.items ?? [])
-    } catch {
-      // 履歴の取得に失敗しても致命的ではないので黙って諦める
+    } catch (err) {
+      setSidebarError(`履歴の取得に失敗しました: ${String(err)}`)
     }
   }, [])
 
@@ -532,9 +590,13 @@ export default function App() {
     if (!window.confirm('この履歴を削除しますか？')) return
     try {
       const resp = await apiFetch(`/history/${id}`, { method: 'DELETE' })
-      if (resp.ok) fetchHistory(historyQuery)
-    } catch {
-      // 削除に失敗しても致命的ではないので黙って諦める
+      if (resp.ok) {
+        fetchHistory(historyQuery)
+      } else {
+        setSidebarError(`履歴の削除に失敗しました: ${await readErrorMessage(resp)}`)
+      }
+    } catch (err) {
+      setSidebarError(`履歴の削除に失敗しました: ${String(err)}`)
     }
   }
 
@@ -556,21 +618,32 @@ export default function App() {
   }
 
   async function addTab() {
+    if (!confirmDiscardComposerIfNeeded()) return
     const created = await createSessionOnServer(NEW_TAB_TITLE)
-    if (!created) return
+    if (!created) {
+      setSidebarError('新しいタブの作成に失敗しました。サーバーへの接続やAPIキーを確認してください。')
+      return
+    }
     savedSnapshots.current[created.id] = JSON.stringify({ title: created.title, messages: created.messages })
     setSessions((prev) => [...prev, created])
     setActiveId(created.id)
   }
 
   async function openHistoryItem(item) {
+    if (!confirmDiscardComposerIfNeeded()) return
     try {
       const resp = await apiFetch(`/history/${item.id}`)
-      if (!resp.ok) return
+      if (!resp.ok) {
+        setSidebarError(`履歴の読み込みに失敗しました: ${await readErrorMessage(resp)}`)
+        return
+      }
       const record = await resp.json()
 
       const created = await createSessionOnServer((record.title || NEW_TAB_TITLE).slice(0, 20))
-      if (!created) return
+      if (!created) {
+        setSidebarError('新しいタブの作成に失敗しました。サーバーへの接続やAPIキーを確認してください。')
+        return
+      }
 
       const messages = [
         {
@@ -587,12 +660,14 @@ export default function App() {
       savedSnapshots.current[created.id] = null
       setSessions((prev) => [...prev, { ...created, messages }])
       setActiveId(created.id)
-    } catch {
-      // 履歴の読み込みに失敗しても致命的ではないので黙って諦める
+    } catch (err) {
+      setSidebarError(`履歴の読み込みに失敗しました: ${String(err)}`)
     }
   }
 
   async function closeTab(id) {
+    if (id === activeId && !confirmDiscardComposerIfNeeded()) return
+
     const index = sessions.findIndex((s) => s.id === id)
     const remaining = sessions.filter((s) => s.id !== id)
     delete savedSnapshots.current[id]
@@ -625,13 +700,18 @@ export default function App() {
           <div
             key={s.id}
             className={`tab ${s.id === activeId ? 'active' : ''}`}
-            onClick={() => setActiveId(s.id)}
+            onClick={() => {
+              if (s.id === activeId) return
+              if (!confirmDiscardComposerIfNeeded()) return
+              setActiveId(s.id)
+            }}
           >
             <span className="tab-title">{s.title}</span>
             {sessions.length > 1 && (
               <button
                 type="button"
                 className="tab-close"
+                aria-label={`タブ「${s.title}」を閉じる`}
                 onClick={(e) => { e.stopPropagation(); closeTab(s.id) }}
               >
                 ×
@@ -639,8 +719,22 @@ export default function App() {
             )}
           </div>
         ))}
-        <button type="button" className="tab-add" onClick={addTab}>＋</button>
+        <button type="button" className="tab-add" aria-label="新しいタブを追加" onClick={addTab}>＋</button>
       </div>
+
+      {sidebarError && (
+        <div className="global-error">
+          <span>{sidebarError}</span>
+          <button
+            type="button"
+            className="global-error-dismiss"
+            aria-label="エラーを閉じる"
+            onClick={() => setSidebarError(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="app-shell">
         <aside className="sidebar">
@@ -679,6 +773,7 @@ export default function App() {
                       type="button"
                       className="history-item-delete"
                       title="この履歴を削除"
+                      aria-label={`${item.title}を削除`}
                       onClick={(e) => handleDeleteHistoryItem(e, item.id)}
                     >
                       🗑
@@ -716,6 +811,7 @@ export default function App() {
             onMessages={(updater) => setMessagesFor(activeSession.id, updater)}
             onFirstTopic={(topic) => setTitleFor(activeSession.id, topic)}
             onGenerated={() => fetchHistory(historyQuery)}
+            onDirtyChange={setComposerDirty}
           />
         </div>
       </div>

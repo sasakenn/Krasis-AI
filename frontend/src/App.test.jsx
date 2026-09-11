@@ -30,6 +30,10 @@ function jsonResponse(body) {
   return { ok: true, text: async () => JSON.stringify(body), json: async () => body }
 }
 
+function jsonErrorResponse(status, detail) {
+  return { ok: false, status, text: async () => JSON.stringify({ detail }) }
+}
+
 // /sessions への GET/POST/PUT/DELETE をインメモリで模倣する簡易フェイクバックエンド。
 function createFakeSessionsBackend(initialSessions = []) {
   let nextId = initialSessions.reduce((max, s) => Math.max(max, s.id), 0) + 1
@@ -175,12 +179,12 @@ describe('App', () => {
     render(<App />)
     await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
 
-    fireEvent.click(screen.getByRole('button', { name: '＋' }))
+    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
     await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(2))
 
     const tabs = screen.getAllByText('新規タブ')
     const secondTab = tabs[1].closest('.tab')
-    fireEvent.click(within(secondTab).getByRole('button', { name: '×' }))
+    fireEvent.click(within(secondTab).getByRole('button', { name: 'タブ「新規タブ」を閉じる' }))
     await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
   })
 
@@ -292,5 +296,75 @@ describe('App', () => {
       expect(generateCall).toBeTruthy()
       expect(generateCall[1].headers?.['X-API-Key']).toBeUndefined()
     })
+  })
+
+  it('shows a dismissible error banner when sessions fail to load', async () => {
+    global.fetch = vi.fn((url, options = {}) => {
+      const method = options.method || 'GET'
+      if (url === '/sessions') {
+        // GETもPOST(フォールバックのタブ作成)も同じ理由で失敗するケースを想定
+        return Promise.resolve(jsonErrorResponse(401, 'invalid or missing API key'))
+      }
+      if (typeof url === 'string' && url.startsWith('/history')) {
+        return Promise.resolve(jsonResponse({ items: [] }))
+      }
+      return Promise.resolve(jsonResponse({}))
+    })
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText(/タブの読み込みに失敗しました/)).toBeInTheDocument())
+    expect(screen.getByText(/invalid or missing API key/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'エラーを閉じる' }))
+    expect(screen.queryByText(/タブの読み込みに失敗しました/)).not.toBeInTheDocument()
+  })
+
+  it('shows an error banner when deleting a history item fails', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    mockFetch({
+      history: {
+        items: [{ id: 7, created_at: '2026-08-30T01:00:00Z', topic: '過去のテーマ', field: '一般', title: '過去の計画' }],
+      },
+    })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
+
+    global.fetch.mockImplementationOnce((url, options) => {
+      expect(url).toBe('/history/7')
+      expect(options.method).toBe('DELETE')
+      return Promise.resolve(jsonErrorResponse(500, 'internal error'))
+    })
+
+    fireEvent.click(screen.getByTitle('この履歴を削除'))
+
+    await waitFor(() => expect(screen.getByText(/履歴の削除に失敗しました/)).toBeInTheDocument())
+    expect(screen.getByText(/internal error/)).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  it('asks for confirmation before switching tabs with unsaved composer input', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
+    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(2))
+
+    const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
+    fireEvent.change(textarea, { target: { value: '未送信の下書き' } })
+
+    const firstTabEl = screen.getAllByText('新規タブ')[0].closest('.tab')
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+
+    fireEvent.click(firstTabEl)
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(textarea).toHaveValue('未送信の下書き') // キャンセルしたのでタブは切り替わらない
+
+    confirmSpy.mockReturnValue(true)
+    fireEvent.click(firstTabEl)
+    await waitFor(() => expect(screen.queryByDisplayValue('未送信の下書き')).not.toBeInTheDocument())
+
+    confirmSpy.mockRestore()
   })
 })
