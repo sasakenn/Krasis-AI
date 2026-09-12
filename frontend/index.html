@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Paper Writing Assistant (Frontend)</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>" />
+    <!-- Sign in with Apple / Googleでのサインインに使うJS SDK。クライアントID未設定時は
+         そもそもボタンが無効化されるので、読み込めなくても本体の動作には影響しない。 -->
+    <script async src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
+    <script async src="https://accounts.google.com/gsi/client"></script>
   </head>
   <body>
     <div id="root"></div>

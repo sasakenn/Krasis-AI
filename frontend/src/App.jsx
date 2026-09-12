@@ -3,7 +3,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 const DEFAULT_FIELD = '一般'
 const NEW_TAB_TITLE = '新規タブ'
 const ACTIVE_SESSION_STORAGE_KEY = 'paper-assistant-active-session-id'
-const API_KEY_STORAGE_KEY = 'paper-assistant-api-key'
+const TOKEN_STORAGE_KEY = 'paper-assistant-token'
 
 function useFileDrop(onFiles) {
   return {
@@ -19,20 +19,27 @@ function makeSession(id) {
   return { id, title: NEW_TAB_TITLE, messages: [] }
 }
 
-function getStoredApiKey() {
+function getStoredToken() {
   try {
-    return localStorage.getItem(API_KEY_STORAGE_KEY) || ''
+    return localStorage.getItem(TOKEN_STORAGE_KEY) || ''
   } catch {
     return ''
   }
 }
 
-// サーバー側でAPI_AUTH_TOKENが設定されている場合のみ、保存済みのAPIキーを
-// X-API-Keyヘッダーに付与する(未設定なら何も付けず、これまで通り動作する)。
+// ログイン済みのセッショントークンをAuthorization: Bearerヘッダーに付与する。
+// 401が返ってきたら(トークン失効・未ログイン)、Appにログイン画面へ戻すよう通知する。
 function apiFetch(url, options = {}) {
-  const apiKey = getStoredApiKey()
-  if (!apiKey) return fetch(url, options)
-  return fetch(url, { ...options, headers: { ...(options.headers || {}), 'X-API-Key': apiKey } })
+  const token = getStoredToken()
+  const headers = { ...(options.headers || {}) }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  return fetch(url, { ...options, headers }).then((resp) => {
+    if (resp.status === 401) {
+      window.dispatchEvent(new Event('auth:unauthorized'))
+    }
+    return resp
+  })
 }
 
 async function createSessionOnServer(title) {
@@ -99,7 +106,10 @@ function OutlineResult({ outline }) {
   return (
     <div className="result">
       <div className="result-header">
-        <h2>{outline.title}</h2>
+        <h2>
+          {outline.title}
+          {outline.is_private && <span className="private-badge" title="シークレット保存">🔒</span>}
+        </h2>
         <button type="button" className="export-button" onClick={() => downloadMarkdown(outline)}>
           📄 Markdownでダウンロード
         </button>
@@ -154,11 +164,149 @@ function LengthQuestion({ question, onChoose }) {
   )
 }
 
+function LoginScreen({ onToken }) {
+  const appleClientId = import.meta.env.VITE_APPLE_CLIENT_ID
+  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+  const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
+  const githubRedirectUri = import.meta.env.VITE_GITHUB_REDIRECT_URI || window.location.origin
+
+  const [error, setError] = useState(null)
+  const [devLoading, setDevLoading] = useState(false)
+
+  useEffect(() => {
+    if (!appleClientId || !window.AppleID) return
+    window.AppleID.auth.init({
+      clientId: appleClientId,
+      scope: 'email',
+      redirectURI: window.location.origin,
+      usePopup: true,
+    })
+  }, [appleClientId])
+
+  useEffect(() => {
+    if (!googleClientId || !window.google) return
+    window.google.accounts.id.initialize({
+      client_id: googleClientId,
+      callback: async (response) => {
+        setError(null)
+        try {
+          const resp = await fetch('/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_token: response.credential }),
+          })
+          if (!resp.ok) throw new Error(await readErrorMessage(resp))
+          const data = await resp.json()
+          onToken(data.token)
+        } catch (err) {
+          setError(String(err))
+        }
+      },
+    })
+    const container = document.getElementById('google-signin-button')
+    if (container) {
+      window.google.accounts.id.renderButton(container, { theme: 'filled_black', size: 'large', width: 260 })
+    }
+  }, [googleClientId, onToken])
+
+  async function handleAppleSignIn() {
+    setError(null)
+    try {
+      const result = await window.AppleID.auth.signIn()
+      const resp = await fetch('/auth/apple', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identity_token: result.authorization.id_token }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      onToken(data.token)
+    } catch (err) {
+      setError(String(err))
+    }
+  }
+
+  function handleGitHubSignIn() {
+    const params = new URLSearchParams({
+      client_id: githubClientId,
+      redirect_uri: githubRedirectUri,
+      scope: 'read:user user:email',
+    })
+    window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
+  }
+
+  async function handleDevLogin() {
+    setError(null)
+    setDevLoading(true)
+    try {
+      const resp = await fetch('/auth/dev', { method: 'POST' })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      onToken(data.token)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setDevLoading(false)
+    }
+  }
+
+  return (
+    <div className="app-root login-screen">
+      <div className="login-card">
+        <div className="sidebar-brand">📚 Paper Assistant</div>
+        <p className="login-subtitle">続けるにはログインしてください</p>
+
+        <div className="login-options">
+          <button
+            type="button"
+            className="login-button login-button-apple"
+            disabled={!appleClientId}
+            onClick={handleAppleSignIn}
+          >
+             Appleでサインイン
+          </button>
+          {!appleClientId && <small className="login-hint">サーバーでAPPLE_CLIENT_IDが未設定です</small>}
+
+          {googleClientId ? (
+            <div id="google-signin-button" className="login-google-button" />
+          ) : (
+            <>
+              <button type="button" className="login-button" disabled>
+                Googleでサインイン
+              </button>
+              <small className="login-hint">サーバーでGOOGLE_CLIENT_IDが未設定です</small>
+            </>
+          )}
+
+          <button
+            type="button"
+            className="login-button login-button-github"
+            disabled={!githubClientId}
+            onClick={handleGitHubSignIn}
+          >
+            GitHubでサインイン
+          </button>
+          {!githubClientId && <small className="login-hint">サーバーでGITHUB_CLIENT_IDが未設定です</small>}
+
+          {import.meta.env.DEV && (
+            <button type="button" className="login-button login-button-dev" onClick={handleDevLogin} disabled={devLoading}>
+              {devLoading ? '処理中…' : '🛠 開発用ログイン'}
+            </button>
+          )}
+        </div>
+
+        {error && <div className="error">Error: {error}</div>}
+      </div>
+    </div>
+  )
+}
+
 function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyChange }) {
   const [topic, setTopic] = useState('')
   const [field, setField] = useState(DEFAULT_FIELD)
   const [referenceFiles, setReferenceFiles] = useState([])
   const [formatFile, setFormatFile] = useState(null)
+  const [isPrivate, setIsPrivate] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [focused, setFocused] = useState(false)
@@ -213,11 +361,12 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
   const referenceDrop = useFileDrop(addReferenceFiles)
   const formatDrop = useFileDrop(setFormatFileFromList)
 
-  async function submitGenerate({ topic: t, field: f, referenceFiles: rf, formatFile: ff, targetLength }) {
+  async function submitGenerate({ topic: t, field: f, referenceFiles: rf, formatFile: ff, targetLength, isPrivate: priv }) {
     const formData = new FormData()
     formData.append('topic', t)
     formData.append('field', f)
     if (targetLength) formData.append('target_length', targetLength)
+    formData.append('private', priv ? 'true' : 'false')
     rf.forEach((file) => formData.append('reference_files', file))
     if (ff) formData.append('format_file', ff)
 
@@ -230,6 +379,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
     setTopic('')
     setReferenceFiles([])
     setFormatFile(null)
+    setIsPrivate(false)
     setPendingRequest(null)
     setAwaitingLength(false)
   }
@@ -253,7 +403,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
     onMessages((prev) => [...prev, userMessage])
     if (messages.length === 0) onFirstTopic(topic)
 
-    const requestSnapshot = { topic, field, referenceFiles, formatFile }
+    const requestSnapshot = { topic, field, referenceFiles, formatFile, isPrivate }
     setLoading(true)
 
     try {
@@ -437,6 +587,15 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
             placeholder="分野(例: 教育技術)"
             disabled={awaitingLength}
           />
+          <label className="private-toggle">
+            <input
+              type="checkbox"
+              checked={isPrivate}
+              onChange={(e) => setIsPrivate(e.target.checked)}
+              disabled={awaitingLength}
+            />
+            🔒 シークレットとして保存
+          </label>
           <button type="submit" className="send-button" disabled={loading || !topic.trim() || awaitingLength}>
             {loading ? '生成中…' : '送信 ➤'}
           </button>
@@ -449,18 +608,72 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
 }
 
 export default function App() {
-  // サーバー側でAPI_AUTH_TOKENが設定されている場合のみ必要になる任意のAPIキー。
-  const [apiKey, setApiKey] = useState(() => getStoredApiKey())
+  // ログイン状態(Apple/Google/GitHub/開発用ログインのいずれかで取得したセッショントークン)。
+  const [authToken, setAuthTokenState] = useState(() => getStoredToken())
+  const [authExchanging, setAuthExchanging] = useState(false)
 
-  function handleApiKeyChange(value) {
-    setApiKey(value)
+  function setAuthToken(token) {
+    setAuthTokenState(token)
     try {
-      if (value) localStorage.setItem(API_KEY_STORAGE_KEY, value)
-      else localStorage.removeItem(API_KEY_STORAGE_KEY)
+      if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token)
+      else localStorage.removeItem(TOKEN_STORAGE_KEY)
     } catch {
-      // ストレージが使えない環境では保存を諦める(このセッション内でのみ有効)
+      // ストレージが使えない環境ではこのセッション内でのみ有効
     }
   }
+
+  // apiFetchが401を受け取ったら(トークン失効・未ログイン)ログイン画面に戻す。
+  useEffect(() => {
+    function handleUnauthorized() {
+      setAuthToken(null)
+    }
+    window.addEventListener('auth:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
+  }, [])
+
+  // GitHubのOAuth認可コード(?code=...)がURLに付いていたら、トークンに交換する。
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const code = params.get('code')
+    if (!code) return
+
+    setAuthExchanging(true)
+    fetch('/auth/github', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    })
+      .then(async (resp) => {
+        if (resp.ok) {
+          const data = await resp.json()
+          setAuthToken(data.token)
+        }
+      })
+      .finally(() => {
+        setAuthExchanging(false)
+        window.history.replaceState({}, '', window.location.pathname)
+      })
+  }, [])
+
+  function handleLogout() {
+    setAuthToken(null)
+  }
+
+  // 利用量(トークン)表示。ログイン後・生成成功後に更新する。
+  const [usage, setUsage] = useState(null)
+
+  const fetchUsage = useCallback(async () => {
+    try {
+      const resp = await apiFetch('/me')
+      if (resp.ok) setUsage(await resp.json())
+    } catch {
+      // 使用量表示の取得に失敗しても致命的ではないので黙って諦める
+    }
+  }, [])
+
+  useEffect(() => {
+    if (authToken) fetchUsage()
+  }, [authToken, fetchUsage])
 
   // サイドバー系の裏側フェッチ(履歴・タブの読み込み/保存)は失敗しても画面が壊れないように
   // 個別にcatchしているが、原因(APIキー誤り・サーバー未接続など)が分かるようここに表示する。
@@ -482,6 +695,7 @@ export default function App() {
   const savedSnapshots = useRef({})
 
   useEffect(() => {
+    if (!authToken) return
     let cancelled = false
 
     async function loadSessions() {
@@ -526,7 +740,7 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [authToken])
 
   useEffect(() => {
     if (!sessionsLoaded || activeId == null) return
@@ -563,11 +777,14 @@ export default function App() {
 
   const [historyItems, setHistoryItems] = useState([])
   const [historyQuery, setHistoryQuery] = useState('')
+  // ON にすると通常の履歴一覧の代わりに🔒シークレット履歴だけを表示する(混在させない)。
+  const [showSecretHistory, setShowSecretHistory] = useState(false)
 
-  const fetchHistory = useCallback(async (query) => {
+  const fetchHistory = useCallback(async (query, scope) => {
     try {
       const params = new URLSearchParams()
       if (query && query.trim()) params.set('q', query.trim())
+      if (scope) params.set('scope', scope)
       const resp = await apiFetch(`/history${params.toString() ? `?${params}` : ''}`)
       if (!resp.ok) {
         setSidebarError(`履歴の取得に失敗しました: ${await readErrorMessage(resp)}`)
@@ -580,10 +797,16 @@ export default function App() {
     }
   }, [])
 
+  const refreshHistory = useCallback(
+    () => fetchHistory(historyQuery, showSecretHistory ? 'private' : undefined),
+    [fetchHistory, historyQuery, showSecretHistory]
+  )
+
   useEffect(() => {
-    const handle = setTimeout(() => fetchHistory(historyQuery), historyQuery ? 300 : 0)
+    if (!authToken) return
+    const handle = setTimeout(refreshHistory, historyQuery ? 300 : 0)
     return () => clearTimeout(handle)
-  }, [historyQuery, fetchHistory])
+  }, [authToken, historyQuery, showSecretHistory, refreshHistory])
 
   async function handleDeleteHistoryItem(e, id) {
     e.stopPropagation()
@@ -591,12 +814,30 @@ export default function App() {
     try {
       const resp = await apiFetch(`/history/${id}`, { method: 'DELETE' })
       if (resp.ok) {
-        fetchHistory(historyQuery)
+        refreshHistory()
       } else {
         setSidebarError(`履歴の削除に失敗しました: ${await readErrorMessage(resp)}`)
       }
     } catch (err) {
       setSidebarError(`履歴の削除に失敗しました: ${String(err)}`)
+    }
+  }
+
+  async function handleTogglePrivacy(e, item) {
+    e.stopPropagation()
+    try {
+      const resp = await apiFetch(`/history/${item.id}/private`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_private: !item.is_private }),
+      })
+      if (resp.ok) {
+        refreshHistory()
+      } else {
+        setSidebarError(`シークレット設定の変更に失敗しました: ${await readErrorMessage(resp)}`)
+      }
+    } catch (err) {
+      setSidebarError(`シークレット設定の変更に失敗しました: ${String(err)}`)
     }
   }
 
@@ -689,6 +930,14 @@ export default function App() {
     }
   }
 
+  if (authExchanging) {
+    return <div className="app-root app-loading">サインイン処理中…</div>
+  }
+
+  if (!authToken) {
+    return <LoginScreen onToken={setAuthToken} />
+  }
+
   if (!sessionsLoaded || !activeSession) {
     return <div className="app-root app-loading">読み込み中…</div>
   }
@@ -742,7 +991,19 @@ export default function App() {
           <div className="sidebar-channel active"># outline-generator</div>
 
           <div className="sidebar-history">
-            <div className="sidebar-history-title">履歴</div>
+            <div className="sidebar-history-header">
+              <div className="sidebar-history-title">
+                {showSecretHistory ? '🔒 シークレット履歴' : '履歴'}
+              </div>
+              <label className="secret-toggle" title="シークレット履歴を表示">
+                <input
+                  type="checkbox"
+                  checked={showSecretHistory}
+                  onChange={(e) => setShowSecretHistory(e.target.checked)}
+                />
+                🔒
+              </label>
+            </div>
             <input
               type="search"
               className="sidebar-history-search"
@@ -752,7 +1013,11 @@ export default function App() {
             />
             {historyItems.length === 0 ? (
               <div className="sidebar-history-empty">
-                {historyQuery.trim() ? '該当する履歴がありません' : 'まだ生成履歴がありません'}
+                {historyQuery.trim()
+                  ? '該当する履歴がありません'
+                  : showSecretHistory
+                  ? 'シークレット履歴はまだありません'
+                  : 'まだ生成履歴がありません'}
               </div>
             ) : (
               <ul className="sidebar-history-list">
@@ -771,6 +1036,15 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      className="history-item-privacy-toggle"
+                      title={item.is_private ? '公開に戻す' : 'シークレットにする'}
+                      aria-label={`${item.title}を${item.is_private ? '公開に戻す' : 'シークレットにする'}`}
+                      onClick={(e) => handleTogglePrivacy(e, item)}
+                    >
+                      {item.is_private ? '🔓' : '🔒'}
+                    </button>
+                    <button
+                      type="button"
                       className="history-item-delete"
                       title="この履歴を削除"
                       aria-label={`${item.title}を削除`}
@@ -785,17 +1059,16 @@ export default function App() {
           </div>
 
           <div className="sidebar-settings">
-            <label className="sidebar-settings-label" htmlFor="api-key-input">
-              APIキー(サーバーで必須の場合のみ)
-            </label>
-            <input
-              id="api-key-input"
-              type="password"
-              className="sidebar-settings-input"
-              placeholder="未設定なら空のままでOK"
-              value={apiKey}
-              onChange={(e) => handleApiKeyChange(e.target.value)}
-            />
+            {usage && (
+              <div className="usage-indicator">
+                プラン: {usage.plan === 'free' ? 'Free' : usage.plan === 'pro' ? 'Pro' : 'Max'}
+                <br />
+                {usage.tokens_used.toLocaleString()} / {usage.tokens_quota.toLocaleString()} トークン
+              </div>
+            )}
+            <button type="button" className="logout-button" onClick={handleLogout}>
+              ログアウト
+            </button>
           </div>
         </aside>
 
@@ -810,7 +1083,7 @@ export default function App() {
             messages={activeSession.messages}
             onMessages={(updater) => setMessagesFor(activeSession.id, updater)}
             onFirstTopic={(topic) => setTitleFor(activeSession.id, topic)}
-            onGenerated={() => fetchHistory(historyQuery)}
+            onGenerated={() => { refreshHistory(); fetchUsage() }}
             onDirtyChange={setComposerDirty}
           />
         </div>

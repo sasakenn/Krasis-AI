@@ -1,7 +1,8 @@
 """
 db.py
 -----
-生成したアウトラインの履歴をSQLiteに保存・参照するモジュール。
+生成したアウトラインの履歴・タブ(セッション)・ユーザー・利用量(トークン)を
+SQLiteに保存・参照するモジュール。
 
 サーバーローカルの単一ファイルDB(SQLite)で十分な規模のアプリのため、
 外部DBサーバーやORMは使わず標準ライブラリの sqlite3 のみで完結させる。
@@ -19,6 +20,8 @@ DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "
 # マルチユーザー化(user_id列の追加)より前に作られた行の所有者として使う固定ID。
 LEGACY_USER_ID = "legacy-local-user"
 
+DEFAULT_PLAN = "free"
+
 
 def _connect() -> sqlite3.Connection:
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -27,16 +30,17 @@ def _connect() -> sqlite3.Connection:
     return conn
 
 
-def _ensure_user_id_column(conn: sqlite3.Connection, table: str) -> None:
-    """user_id列導入前に作られたDBファイル向けの簡易マイグレーション。
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl_type: str, backfill=None) -> None:
+    """指定列の追加前に作られたDBファイル向けの簡易マイグレーション。
 
-    既存行はLEGACY_USER_IDの所有として引き継ぐ(データを消さずに済ませる)。
+    backfillを渡すと、既存行のNULLをその値で埋める(データを消さずに済ませる)。
     """
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-    if "user_id" in columns:
+    if column in columns:
         return
-    conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
-    conn.execute(f"UPDATE {table} SET user_id = ? WHERE user_id IS NULL", (LEGACY_USER_ID,))
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}")
+    if backfill is not None:
+        conn.execute(f"UPDATE {table} SET {column} = ? WHERE {column} IS NULL", (backfill,))
 
 
 def init_db() -> None:
@@ -60,7 +64,8 @@ def init_db() -> None:
                 field TEXT NOT NULL,
                 target_length TEXT,
                 title TEXT NOT NULL,
-                outline_json TEXT NOT NULL
+                outline_json TEXT NOT NULL,
+                is_private INTEGER NOT NULL DEFAULT 0
             )
             """
         )
@@ -75,10 +80,21 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS entitlements (
+                user_id TEXT PRIMARY KEY,
+                plan TEXT NOT NULL DEFAULT 'free',
+                tokens_used INTEGER NOT NULL DEFAULT 0,
+                period_start TEXT NOT NULL
+            )
+            """
+        )
 
-        # user_id列導入前のDBファイルを引き続き使えるようにする簡易マイグレーション。
-        _ensure_user_id_column(conn, "generations")
-        _ensure_user_id_column(conn, "sessions")
+        # 列追加前のDBファイルを引き続き使えるようにする簡易マイグレーション。
+        _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
+        _ensure_column(conn, "sessions", "user_id", "TEXT", backfill=LEGACY_USER_ID)
+        _ensure_column(conn, "generations", "is_private", "INTEGER", backfill=0)
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, ?)",
             (LEGACY_USER_ID, datetime.now(timezone.utc).isoformat()),
@@ -94,17 +110,25 @@ def upsert_user(user_id: str, email: str | None) -> None:
                 (user_id, email, datetime.now(timezone.utc).isoformat()),
             )
         elif email:
-            # Appleがメールアドレスを返すのは初回サインイン時のみのことが多いので、
+            # 各プロバイダーがメールアドレスを返すのは初回サインイン時のみのことが多いので、
             # 渡ってきた場合だけ上書きする(以降のサインインでNoneに戻さないため)。
             conn.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
 
 
-def save_generation(user_id: str, topic: str, field: str, target_length: str, outline: dict) -> int:
+def save_generation(
+    user_id: str,
+    topic: str,
+    field: str,
+    target_length: str,
+    outline: dict,
+    is_private: bool = False,
+) -> int:
     with _connect() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO generations (user_id, created_at, topic, field, target_length, title, outline_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO generations
+                (user_id, created_at, topic, field, target_length, title, outline_json, is_private)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -114,44 +138,52 @@ def save_generation(user_id: str, topic: str, field: str, target_length: str, ou
                 target_length,
                 outline.get("title", ""),
                 json.dumps(outline, ensure_ascii=False),
+                int(is_private),
             ),
         )
         return cursor.lastrowid
 
 
-def list_generations(user_id: str, limit: int = 50, q: str | None = None) -> list[dict]:
+def list_generations(
+    user_id: str, limit: int = 50, q: str | None = None, only_private: bool = False
+) -> list[dict]:
+    privacy_filter = 1 if only_private else 0
     with _connect() as conn:
         if q and q.strip():
             like = f"%{q.strip()}%"
             rows = conn.execute(
                 """
-                SELECT id, created_at, topic, field, target_length, title
+                SELECT id, created_at, topic, field, target_length, title, is_private
                 FROM generations
-                WHERE user_id = ? AND (title LIKE ? OR topic LIKE ?)
+                WHERE user_id = ? AND is_private = ? AND (title LIKE ? OR topic LIKE ?)
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (user_id, like, like, limit),
+                (user_id, privacy_filter, like, like, limit),
             ).fetchall()
         else:
             rows = conn.execute(
                 """
-                SELECT id, created_at, topic, field, target_length, title
+                SELECT id, created_at, topic, field, target_length, title, is_private
                 FROM generations
-                WHERE user_id = ?
+                WHERE user_id = ? AND is_private = ?
                 ORDER BY id DESC
                 LIMIT ?
                 """,
-                (user_id, limit),
+                (user_id, privacy_filter, limit),
             ).fetchall()
-        return [dict(row) for row in rows]
+
+    results = [dict(row) for row in rows]
+    for item in results:
+        item["is_private"] = bool(item["is_private"])
+    return results
 
 
 def get_generation(user_id: str, generation_id: int) -> dict | None:
     with _connect() as conn:
         row = conn.execute(
             """
-            SELECT id, created_at, topic, field, target_length, title, outline_json
+            SELECT id, created_at, topic, field, target_length, title, outline_json, is_private
             FROM generations
             WHERE id = ? AND user_id = ?
             """,
@@ -163,6 +195,7 @@ def get_generation(user_id: str, generation_id: int) -> dict | None:
 
     result = dict(row)
     result["outline"] = json.loads(result.pop("outline_json"))
+    result["is_private"] = bool(result["is_private"])
     return result
 
 
@@ -170,6 +203,15 @@ def delete_generation(user_id: str, generation_id: int) -> bool:
     with _connect() as conn:
         cursor = conn.execute(
             "DELETE FROM generations WHERE id = ? AND user_id = ?", (generation_id, user_id)
+        )
+        return cursor.rowcount > 0
+
+
+def set_generation_privacy(user_id: str, generation_id: int, is_private: bool) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE generations SET is_private = ? WHERE id = ? AND user_id = ?",
+            (int(is_private), generation_id, user_id),
         )
         return cursor.rowcount > 0
 
@@ -220,3 +262,59 @@ def delete_session(user_id: str, session_id: int) -> bool:
             "DELETE FROM sessions WHERE id = ? AND user_id = ?", (session_id, user_id)
         )
         return cursor.rowcount > 0
+
+
+def _period_key(moment: datetime) -> str:
+    return moment.strftime("%Y-%m")
+
+
+def get_or_create_entitlement(user_id: str) -> dict:
+    """user_idの利用量エンタイトルメントを返す。
+
+    行が無ければ free プランで新規作成する。既存行の period_start が
+    今の(UTCの)年月と異なる場合は、月次ロールオーバーとして tokens_used を
+    0にリセットしてperiod_startを更新する。
+    """
+    now = datetime.now(timezone.utc)
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, plan, tokens_used, period_start FROM entitlements WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+
+        if row is None:
+            now_iso = now.isoformat()
+            conn.execute(
+                "INSERT INTO entitlements (user_id, plan, tokens_used, period_start) VALUES (?, ?, 0, ?)",
+                (user_id, DEFAULT_PLAN, now_iso),
+            )
+            return {"user_id": user_id, "plan": DEFAULT_PLAN, "tokens_used": 0, "period_start": now_iso}
+
+        entitlement = dict(row)
+        period_start = datetime.fromisoformat(entitlement["period_start"])
+        if _period_key(period_start) != _period_key(now):
+            now_iso = now.isoformat()
+            conn.execute(
+                "UPDATE entitlements SET tokens_used = 0, period_start = ? WHERE user_id = ?",
+                (now_iso, user_id),
+            )
+            entitlement["tokens_used"] = 0
+            entitlement["period_start"] = now_iso
+        return entitlement
+
+
+def add_token_usage(user_id: str, tokens: int) -> dict:
+    """ロールオーバーを済ませたうえでtokens_usedに加算し、最新のentitlementを返す。"""
+    entitlement = get_or_create_entitlement(user_id)
+    new_total = entitlement["tokens_used"] + max(tokens, 0)
+    with _connect() as conn:
+        conn.execute("UPDATE entitlements SET tokens_used = ? WHERE user_id = ?", (new_total, user_id))
+    entitlement["tokens_used"] = new_total
+    return entitlement
+
+
+def set_plan(user_id: str, plan: str) -> None:
+    """プランを変更する(現時点では手動操作用。将来は決済Webhookから呼ぶ想定)。"""
+    get_or_create_entitlement(user_id)
+    with _connect() as conn:
+        conn.execute("UPDATE entitlements SET plan = ? WHERE user_id = ?", (plan, user_id))

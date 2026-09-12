@@ -71,27 +71,57 @@ function createFakeSessionsBackend(initialSessions = []) {
   }
 }
 
-function mockFetch({ history = { items: [] }, generateResponses = [], sessions = [] } = {}) {
+const DEFAULT_USAGE = {
+  user_id: 'test-user',
+  plan: 'free',
+  tokens_used: 100,
+  tokens_quota: 20000,
+  period_start: '2026-01-01T00:00:00+00:00',
+}
+
+function mockFetch({ history = { items: [] }, generateResponses = [], sessions = [], usage = DEFAULT_USAGE } = {}) {
   let call = 0
-  let historyItems = history.items.slice()
+  let historyItems = history.items.map((item) => ({ is_private: false, ...item }))
   const sessionsBackend = createFakeSessionsBackend(sessions)
 
   global.fetch = vi.fn((url, options = {}) => {
-    if (typeof url === 'string' && url.startsWith('/history')) {
-      const method = options.method || 'GET'
-      const deleteMatch = url.match(/^\/history\/(\d+)$/)
+    const method = options.method || 'GET'
 
+    if (url === '/me') {
+      return Promise.resolve(jsonResponse(usage))
+    }
+
+    if (url === '/auth/dev' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ token: 'dev-token' }))
+    }
+
+    if (typeof url === 'string' && url.startsWith('/history')) {
+      const deleteMatch = url.match(/^\/history\/(\d+)$/)
+      const privacyMatch = url.match(/^\/history\/(\d+)\/private$/)
+
+      if (privacyMatch && method === 'PUT') {
+        const id = Number(privacyMatch[1])
+        const body = JSON.parse(options.body)
+        const item = historyItems.find((h) => h.id === id)
+        if (item) item.is_private = body.is_private
+        return Promise.resolve(jsonResponse({ status: 'ok' }))
+      }
       if (deleteMatch && method === 'DELETE') {
         const id = Number(deleteMatch[1])
         historyItems = historyItems.filter((item) => item.id !== id)
         return Promise.resolve(jsonResponse({ status: 'deleted' }))
       }
-      if (url.startsWith('/history?')) {
-        const q = decodeURIComponent(url.split('q=')[1] || '')
-        const filtered = historyItems.filter((item) => item.title.includes(q) || item.topic.includes(q))
+      if (url.includes('?')) {
+        const params = new URL(url, 'http://localhost').searchParams
+        const q = params.get('q') || ''
+        const wantsPrivate = params.get('scope') === 'private'
+        const filtered = historyItems.filter(
+          (item) =>
+            Boolean(item.is_private) === wantsPrivate && (!q || item.title.includes(q) || item.topic.includes(q))
+        )
         return Promise.resolve(jsonResponse({ items: filtered }))
       }
-      return Promise.resolve(jsonResponse({ items: historyItems }))
+      return Promise.resolve(jsonResponse({ items: historyItems.filter((item) => !item.is_private) }))
     }
 
     if (typeof url === 'string' && url.startsWith('/sessions')) {
@@ -115,6 +145,9 @@ async function submitTopic(topic = '生成AIと教育') {
 
 beforeEach(() => {
   localStorage.clear()
+  // 大半のテストはログイン済み状態のアプリ本体を検証したいので、あらかじめトークンを
+  // 入れておく(未ログイン時の挙動を見るテストは個別にトークンを消してから使う)。
+  localStorage.setItem('paper-assistant-token', 'test-token')
   mockFetch()
 })
 
@@ -271,39 +304,115 @@ describe('App', () => {
     confirmSpy.mockRestore()
   })
 
-  it('sends the saved API key as an X-API-Key header once entered', async () => {
+  it('sends the stored session token as a Bearer header', async () => {
+    mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
+    render(<App />)
+    await submitTopic()
+
+    await waitFor(() => {
+      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
+      expect(generateCall).toBeTruthy()
+      expect(generateCall[1].headers.Authorization).toBe('Bearer test-token')
+    })
+  })
+
+  it('sends the private flag from the composer checkbox', async () => {
+    mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
+    render(<App />)
+
+    const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
+    fireEvent.change(textarea, { target: { value: 'シークレットテーマ' } })
+    fireEvent.click(screen.getByLabelText(/シークレットとして保存/))
+    fireEvent.click(screen.getByRole('button', { name: /送信/ }))
+
+    await waitFor(() => {
+      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
+      expect(generateCall).toBeTruthy()
+      expect(generateCall[1].body.get('private')).toBe('true')
+    })
+  })
+
+  it('shows the usage indicator fetched from /me', async () => {
+    mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro', tokens_used: 1234, tokens_quota: 200000 } })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText(/Pro/)).toBeInTheDocument())
+    expect(screen.getByText(/1,234 \/ 200,000 トークン/)).toBeInTheDocument()
+  })
+
+  it('logs out and returns to the login screen', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
 
-    fireEvent.change(screen.getByLabelText(/APIキー/), { target: { value: 'my-secret-key' } })
+    fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
 
-    await submitTopic()
-
-    await waitFor(() => {
-      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
-      expect(generateCall).toBeTruthy()
-      expect(generateCall[1].headers['X-API-Key']).toBe('my-secret-key')
-    })
-    expect(localStorage.getItem('paper-assistant-api-key')).toBe('my-secret-key')
+    await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBeNull()
   })
 
-  it('does not send an X-API-Key header when no key is set', async () => {
+  it('returns to the login screen when a request comes back 401 (expired token)', async () => {
     render(<App />)
-    await submitTopic()
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
 
-    await waitFor(() => {
-      const generateCall = global.fetch.mock.calls.find(([url]) => url === '/generate')
-      expect(generateCall).toBeTruthy()
-      expect(generateCall[1].headers?.['X-API-Key']).toBeUndefined()
+    global.fetch = vi.fn(() => Promise.resolve(jsonErrorResponse(401, 'token expired')))
+    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
+
+    await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBeNull()
+  })
+
+  it('toggles an individual history item between public and secret', async () => {
+    mockFetch({
+      history: {
+        items: [
+          { id: 5, created_at: '2026-08-30T01:00:00Z', topic: 'トグル対象', field: '一般', title: 'トグル計画' },
+        ],
+      },
     })
+
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('トグル計画')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: 'トグル計画をシークレットにする' }))
+
+    await waitFor(() => expect(screen.queryByText('トグル計画')).not.toBeInTheDocument())
+  })
+
+  it('shows the secret history list only when the toggle is on', async () => {
+    mockFetch({
+      history: {
+        items: [
+          { id: 1, created_at: '2026-08-30T01:00:00Z', topic: '公開テーマ', field: '一般', title: '公開計画' },
+          {
+            id: 2,
+            created_at: '2026-08-30T01:00:00Z',
+            topic: '秘密テーマ',
+            field: '一般',
+            title: '秘密計画',
+            is_private: true,
+          },
+        ],
+      },
+    })
+
+    const { container } = render(<App />)
+    await waitFor(() => expect(screen.getByText('公開計画')).toBeInTheDocument())
+    expect(screen.queryByText('秘密計画')).not.toBeInTheDocument()
+
+    fireEvent.click(container.querySelector('.secret-toggle input'))
+
+    await waitFor(() => expect(screen.getByText('秘密計画')).toBeInTheDocument())
+    expect(screen.queryByText('公開計画')).not.toBeInTheDocument()
   })
 
   it('shows a dismissible error banner when sessions fail to load', async () => {
-    global.fetch = vi.fn((url, options = {}) => {
-      const method = options.method || 'GET'
+    // 401は「未認証」として専用のログイン画面への復帰処理に一本化されているので、
+    // ここでは(ログインは有効なままの)サーバーエラーでバナー表示を確認する。
+    global.fetch = vi.fn((url) => {
+      if (url === '/me') return Promise.resolve(jsonResponse(DEFAULT_USAGE))
       if (url === '/sessions') {
         // GETもPOST(フォールバックのタブ作成)も同じ理由で失敗するケースを想定
-        return Promise.resolve(jsonErrorResponse(401, 'invalid or missing API key'))
+        return Promise.resolve(jsonErrorResponse(500, 'internal server error'))
       }
       if (typeof url === 'string' && url.startsWith('/history')) {
         return Promise.resolve(jsonResponse({ items: [] }))
@@ -314,7 +423,7 @@ describe('App', () => {
     render(<App />)
 
     await waitFor(() => expect(screen.getByText(/タブの読み込みに失敗しました/)).toBeInTheDocument())
-    expect(screen.getByText(/invalid or missing API key/)).toBeInTheDocument()
+    expect(screen.getByText(/internal server error/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'エラーを閉じる' }))
     expect(screen.queryByText(/タブの読み込みに失敗しました/)).not.toBeInTheDocument()
@@ -366,5 +475,36 @@ describe('App', () => {
     await waitFor(() => expect(screen.queryByDisplayValue('未送信の下書き')).not.toBeInTheDocument())
 
     confirmSpy.mockRestore()
+  })
+})
+
+describe('LoginScreen', () => {
+  beforeEach(() => {
+    localStorage.removeItem('paper-assistant-token')
+  })
+
+  it('shows the login screen when there is no stored token', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
+  })
+
+  it('logs in via the dev login button and shows the app', async () => {
+    render(<App />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /開発用ログイン/ })).toBeInTheDocument()
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /開発用ログイン/ }))
+
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBe('dev-token')
+  })
+
+  it('disables provider buttons when their client id is not configured', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
+
+    expect(screen.getByRole('button', { name: /Appleでサインイン/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /GitHubでサインイン/ })).toBeDisabled()
   })
 })

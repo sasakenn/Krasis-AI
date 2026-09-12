@@ -11,16 +11,26 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pypdf import PdfReader
 
-from auth import AuthError, create_app_token, decode_app_token, verify_apple_identity_token
+from auth import (
+    AuthError,
+    create_app_token,
+    decode_app_token,
+    exchange_github_code_for_user,
+    verify_apple_identity_token,
+    verify_google_id_token,
+)
 from db import (
+    add_token_usage,
     create_session,
     delete_generation,
     delete_session,
     get_generation,
+    get_or_create_entitlement,
     init_db,
     list_generations,
     list_sessions,
     save_generation,
+    set_generation_privacy,
     update_session,
     upsert_user,
 )
@@ -54,6 +64,9 @@ DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
 # /generate 1件あたりClaude APIを呼ぶため、誤操作や不具合でのコスト暴走を防ぐための
 # 簡易レート制限(ユーザーごとの1分あたりの上限リクエスト数)。0以下で無効化。
 GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
+
+# 月額プランごとのトークン枠(仮の数値。決済連携までは set_plan で手動変更する)。
+PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 20_000, "pro": 200_000, "max": 1_000_000}
 
 _rate_limit_lock = Lock()
 _rate_limit_state: Dict[str, Tuple[int, int]] = {}
@@ -99,6 +112,18 @@ def _enforce_generate_rate_limit(key: str) -> None:
 
 class AppleSignInRequest(BaseModel):
     identity_token: str
+
+
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+
+
+class GitHubSignInRequest(BaseModel):
+    code: str
+
+
+class PrivacyUpdate(BaseModel):
+    is_private: bool
 
 
 class SessionCreate(BaseModel):
@@ -190,15 +215,50 @@ def health():
     return {"status": "ok"}
 
 
+def _issue_session_token(provider: str, claims: dict) -> dict:
+    """検証済みclaimsから内部user_id(provider:sub)を組み立て、セッショントークンを発行する。
+
+    プロバイダーが違えば同じ人でも別アカウント扱いになる(自動アカウント統合はしない)。
+    """
+    user_id = f"{provider}:{claims['sub']}"
+    upsert_user(user_id, claims.get("email"))
+    return {"token": create_app_token(user_id)}
+
+
 @app.post("/auth/apple")
 def auth_apple(payload: AppleSignInRequest):
     try:
         claims = verify_apple_identity_token(payload.identity_token)
-        upsert_user(claims["sub"], claims.get("email"))
-        token = create_app_token(claims["sub"])
+        return _issue_session_token("apple", claims)
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    return {"token": token}
+
+
+@app.post("/auth/google")
+def auth_google(payload: GoogleSignInRequest):
+    try:
+        claims = verify_google_id_token(payload.id_token)
+        return _issue_session_token("google", claims)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.post("/auth/github")
+def auth_github(payload: GitHubSignInRequest):
+    try:
+        claims = exchange_github_code_for_user(payload.code)
+        return _issue_session_token("github", claims)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.post("/auth/dev")
+def auth_dev():
+    """開発用: DEV_BYPASS_USER_ID設定時のみ、ブラウザのログイン画面からワンクリックで
+    その固定ユーザーとしてのトークンを取得できる(本番では404)。"""
+    if not DEV_BYPASS_USER_ID:
+        raise HTTPException(status_code=404, detail="not found")
+    return {"token": create_app_token(DEV_BYPASS_USER_ID)}
 
 
 @app.post("/generate")
@@ -206,6 +266,7 @@ async def generate(
     topic: str = Form(...),
     field: str = Form("一般"),
     target_length: Optional[str] = Form(default=None),
+    private: bool = Form(False),
     reference_files: Optional[List[UploadFile]] = File(default=None),
     format_file: Optional[UploadFile] = File(default=None),
     user_id: str = Depends(get_current_user),
@@ -227,6 +288,14 @@ async def generate(
     if target_length not in LENGTH_OPTION_KEYS:
         raise HTTPException(status_code=400, detail="invalid target_length")
 
+    entitlement = get_or_create_entitlement(user_id)
+    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
+    if entitlement["tokens_used"] >= quota:
+        raise HTTPException(
+            status_code=402,
+            detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
+        )
+
     reference_notes = ""
     if reference_files:
         notes = [await _describe_upload(f) for f in reference_files if f.filename]
@@ -238,14 +307,24 @@ async def generate(
 
     outline = generate_outline(topic, field, reference_notes, format_notes, target_length)
     outline = _attach_literature(outline)
+
+    usage = outline.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+    add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+
     outline["type"] = "outline"
-    outline["id"] = save_generation(user_id, topic, field, target_length, outline)
+    outline["id"] = save_generation(user_id, topic, field, target_length, outline, is_private=private)
+    outline["is_private"] = private
     return outline
 
 
 @app.get("/history")
-def history(limit: int = 50, q: Optional[str] = None, user_id: str = Depends(get_current_user)):
-    return {"items": list_generations(user_id, limit=limit, q=q)}
+def history(
+    limit: int = 50,
+    q: Optional[str] = None,
+    scope: Optional[str] = None,
+    user_id: str = Depends(get_current_user),
+):
+    return {"items": list_generations(user_id, limit=limit, q=q, only_private=(scope == "private"))}
 
 
 @app.get("/history/{generation_id}")
@@ -261,6 +340,20 @@ def history_delete(generation_id: int, user_id: str = Depends(get_current_user))
     if not delete_generation(user_id, generation_id):
         raise HTTPException(status_code=404, detail="generation not found")
     return {"status": "deleted"}
+
+
+@app.put("/history/{generation_id}/private")
+def history_set_private(generation_id: int, payload: PrivacyUpdate, user_id: str = Depends(get_current_user)):
+    if not set_generation_privacy(user_id, generation_id, payload.is_private):
+        raise HTTPException(status_code=404, detail="generation not found")
+    return {"status": "ok"}
+
+
+@app.get("/me")
+def me(user_id: str = Depends(get_current_user)):
+    entitlement = get_or_create_entitlement(user_id)
+    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
+    return {**entitlement, "tokens_quota": quota}
 
 
 @app.get("/sessions")

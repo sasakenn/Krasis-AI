@@ -195,7 +195,14 @@ def generate_outline(
                 messages=[{"role": "user", "content": prompt}],
             )
             text_block = next(block for block in resp.content if block.type == "text")
-            return _parse_model_response(text_block.text)
+            outline = _parse_model_response(text_block.text)
+            # 呼び出し元(app.py)がトークン利用量を課金/クォータ管理に使うための内部情報。
+            # クライアントへのレスポンスに含める前にpopして取り除く。
+            outline["_token_usage"] = {
+                "input_tokens": resp.usage.input_tokens,
+                "output_tokens": resp.usage.output_tokens,
+            }
+            return outline
         except Exception:
             logger.warning(
                 "Claude呼び出しに失敗したためフォールバックのアウトラインを返します(topic=%r, field=%r)",

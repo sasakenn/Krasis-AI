@@ -51,10 +51,11 @@ macOSのlaunchdにバックエンド/フロントエンドを登録すると、�
 
 ## APIキーの設定
 
-`.env.example` を `.env` にコピーし、`ANTHROPIC_API_KEY` を設定してください(未設定でも `generate_outline` は簡易フォールバックで動作します)。
+`.env.example` を `.env` にコピーし、`ANTHROPIC_API_KEY` を設定してください(未設定でも `generate_outline` は簡易フォールバックで動作します)。ログイン機能を試すには、少なくとも `JWT_SECRET` と `DEV_BYPASS_USER_ID` の設定を推奨します(下記「認証」セクション参照)。
 
 ```bash
 cp .env.example .env
+cp frontend/.env.example frontend/.env   # 任意: Apple/Google/GitHubの実クライアントIDを使う場合のみ
 ```
 
 ## APIの動作確認(curl)
@@ -76,21 +77,28 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 任意で参考資料・フォーマット指定ファイルも添付できます: `-F "reference_files=@notes.txt" -F "format_file=@format.txt"`
 
-## 認証(Sign in with Apple) — マルチユーザー対応
+## 認証(Apple / Google / GitHub でのログイン) — マルチユーザー・Web強制ログイン対応
 
-App Store公開を見据え、認証はSign in with Appleに一本化されています。`/generate` `/history*` `/sessions*` はすべて `Authorization: Bearer <token>` を要求し、`generations` / `sessions` はDB上でuser_idごとに分離されます(他人のデータは一覧にも出ないし、直接IDを指定しても404になります)。
+`/generate` `/history*` `/sessions*` `/me` はすべて `Authorization: Bearer <token>` を要求し、`generations` / `sessions` はDB上でuser_idごとに分離されます(他人のデータは一覧にも出ないし、直接IDを指定しても404になります)。フロントエンドも強制ログイン制で、未ログインだと専用のログイン画面が表示されます。
 
-**トークンの取得**: `POST /auth/apple` に `{"identity_token": "<Sign in with Appleが返すidentity token>"}` を送ると、以後のAPIで使うアプリ独自のセッショントークン(30日有効)が返ります。これを利用するには `.env` に以下を設定する必要があります(Apple Developer Program登録後、Apple Developer portalで取得):
+**ログイン方法は3つ**、いずれもフロントエンドのログイン画面から使えます:
 
-```bash
-# .env
-APPLE_CLIENT_ID=your.services.id
-JWT_SECRET=$(openssl rand -hex 32)   # 生成例
-```
+| プロバイダー | フロントエンドに必要な設定 | バックエンドに必要な設定 |
+|---|---|---|
+| Apple | `frontend/.env` の `VITE_APPLE_CLIENT_ID` | `.env` の `APPLE_CLIENT_ID` |
+| Google | `frontend/.env` の `VITE_GOOGLE_CLIENT_ID` | `.env` の `GOOGLE_CLIENT_ID` |
+| GitHub | `frontend/.env` の `VITE_GITHUB_CLIENT_ID` / `VITE_GITHUB_REDIRECT_URI` | `.env` の `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` |
 
-**⚠️ フロントエンド(`frontend/`)は現時点でSign in with Appleに未対応です**。ネイティブのSign in with Appleフローは、iOSアプリ化(Capacitor)のタイミングで実装する計画のため、現状ブラウザ版のUIから`/generate`等を呼ぶと401になります。
+各プロバイダーのクライアントID等は無料で取得できます(Apple Developer Programは登録自体が有料の$99/年)。未設定のプロバイダーはログイン画面でボタンが無効表示になるだけで、他のプロバイダーやアプリ全体の動作には影響しません。
 
-**ローカルでの動作確認**: `.env` に `DEV_BYPASS_USER_ID` を設定すると、`X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってAPIを直接(curl等で)叩けます。**本番環境では絶対に設定しないこと**(誰でも他人になりすませてしまう)。
+**⚠️ 同じ人でもプロバイダーが違えば別アカウント扱いです**(例: Appleでログインした後にGoogleでログインしても、内部的には別ユーザーとしてデータが分かれます)。自動アカウント統合は未実装です。
+
+**ローカルでの動作確認**(実プロバイダーの認証情報が無くてもOK): `.env` に `DEV_BYPASS_USER_ID` を設定すると、
+
+1. ログイン画面に「🛠 開発用ログイン」ボタンが現れ、ワンクリックでその固定ユーザーとしてログインできる
+2. curl等から `X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってAPIを直接叩ける
+
+**本番環境では絶対に設定しないこと**(誰でも他人になりすませてしまう)。
 
 ```bash
 # .env(ローカル開発用)
@@ -105,16 +113,40 @@ curl http://127.0.0.1:8000/history -H "X-Dev-User-Id: local-dev-user"
 
 また、誤操作や不具合でのClaude APIコスト暴走を防ぐため、`/generate`にはユーザーごとに1分あたりのリクエスト数の簡易レート制限があります(デフォルト20件、`.env`の`GENERATE_RATE_LIMIT_PER_MINUTE`で変更、0以下で無効化)。
 
+## トークン利用量・プラン(月額サブスクの土台)
+
+ユーザーごとに`free`/`pro`/`max`プランとトークン使用量(`entitlements`テーブル)を持ち、`/generate`はClaudeの実トークン消費量(`input_tokens + output_tokens`)を積算し、月初(UTC基準)に自動でリセットします。上限に達すると`/generate`は`402`を返し、フロントエンドにわかりやすいメッセージが表示されます。
+
+```bash
+curl http://127.0.0.1:8000/me -H "X-Dev-User-Id: local-dev-user"
+# → {"user_id": "...", "plan": "free", "tokens_used": 123, "period_start": "...", "tokens_quota": 20000}
+```
+
+プラン枠は`app.py`の`PLAN_TOKEN_QUOTAS`で定義(デフォルト free=20,000 / pro=200,000 / max=1,000,000)。**現時点では決済(Stripe/StoreKit)は未接続**で、プラン変更は`db.py`の`set_plan(user_id, plan)`を直接呼ぶ手動運用です(将来、決済のWebhookから呼ぶ想定)。
+
+## シークレット(非公開)履歴
+
+生成時にコンポーザーの「🔒 シークレットとして保存」にチェックを入れると、その履歴は通常の一覧から除外され、サイドバーの「🔒」トグルをONにしたときだけ表示されます(混在はしません)。後から個々の履歴を🔒/🔓ボタンで公開⇄非公開に切り替えることもできます。アクセス制御ではなく可視性フラグなので、URLやIDを直接知っていれば(同じユーザー本人なら)スコープに関係なく取得できます。
+
+```bash
+curl -X POST http://127.0.0.1:8000/generate -F "topic=..." -F "target_length=1-100" -F "private=true" -H "X-Dev-User-Id: local-dev-user"
+curl "http://127.0.0.1:8000/history?scope=private" -H "X-Dev-User-Id: local-dev-user"
+curl -X PUT http://127.0.0.1:8000/history/1/private -d '{"is_private": true}' -H 'Content-Type: application/json' -H "X-Dev-User-Id: local-dev-user"
+```
+
 ## 生成履歴(SQLite)
 
 `/generate` で生成に成功したアウトラインは、サーバー側のSQLite(`data/app.db`、初回起動時に自動作成)へ自動保存されます。
 
 ```bash
-curl http://127.0.0.1:8000/history                       # 履歴一覧(新しい順、id/topic/field/title/created_at)
+curl http://127.0.0.1:8000/history                       # 履歴一覧(新しい順、非公開は除く)
 curl "http://127.0.0.1:8000/history?q=キーワード"          # topic/titleでの部分一致検索
+curl "http://127.0.0.1:8000/history?scope=private"        # 非公開(シークレット)履歴のみ
 curl http://127.0.0.1:8000/history/1                      # 特定の履歴の詳細(アウトライン全体を含む)
 curl -X DELETE http://127.0.0.1:8000/history/1            # 履歴の削除
 ```
+
+(いずれも認証ヘッダーが必要。上記「認証」セクション参照)
 
 フロントエンドのサイドバーにも「履歴」として一覧表示され、検索ボックスで絞り込み、クリックすると新しいタブでその内容を開き直せます。各項目にカーソルを合わせると削除ボタンが表示されます。`data/` は`.gitignore`対象です。
 
@@ -150,18 +182,18 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/auth/apple`, `/generate`, `/health`, `/history`, `/history/{id}`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
-- `auth.py`: Sign in with Apple の identity token 検証と、アプリ独自セッションJWTの発行・検証(`verify_apple_identity_token` / `create_app_token` / `decode_app_token`)。
-- `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。
+- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `auth.py`: Apple/Googleのidentity token検証(共通のOIDC検証ロジック)、GitHubの認可コード交換、アプリ独自セッションJWTの発行・検証。
+- `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。生成時のトークン利用量も返す。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
-- `db.py`: ユーザー・生成履歴・タブ(セッション)をSQLiteに保存・参照する(`upsert_user` / `save_generation` / `list_generations` / `get_generation` / `delete_generation` / `create_session` / `list_sessions` / `update_session` / `delete_session`)。すべてuser_idでスコープされる。
-- `frontend/`: React(Vite)フロントエンド。Slack風のチャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。**現時点ではSign in with Apple未対応**(上記「認証」セクション参照)。
+- `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメントをSQLiteに保存・参照する。すべてuser_idでスコープされる。
+- `frontend/`: React(Vite)フロントエンド。強制ログイン制のSlack風チャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。
 
 ## App Store公開に向けたロードマップ
 
-今回実装したのはマルチユーザー化 + Sign in with Apple検証という土台部分のみ。残りは以下の順で進める想定:
+今回実装したのはマルチユーザー化 + マルチプロバイダーログイン + トークン利用量のゲート機構 + 非公開履歴。残りは以下の順で進める想定:
 
-- サブスク課金(App Store Server Notifications V2・エンタイトルメント管理・`/generate`のゲート)
+- サブスク課金の実接続(App Store Server Notifications V2 / Stripe Webhookからのプラン変更、`set_plan`の自動化)
 - クラウドへの常時デプロイ(Dockerfile・ホスティング・HTTPS)
-- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブSign in with Apple・StoreKit)
+- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブログイン・StoreKit)
 - Apple Developer Program登録・App Store Connectでのアプリ/課金商品登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)

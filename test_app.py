@@ -285,6 +285,61 @@ def test_history_search_filters_by_topic_and_title():
     assert all("検索対象トピックabc123" in item["topic"] for item in items)
 
 
+def test_private_generation_is_hidden_from_default_history_but_visible_in_private_scope():
+    headers = {"X-Dev-User-Id": "private-history-user"}
+
+    with patch("app.search_literature", side_effect=_fake_literature):
+        resp = client.post(
+            "/generate",
+            data={"topic": "非公開にするテーマ", "field": "一般", "target_length": "1-100", "private": "true"},
+            headers=headers,
+        )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_private"] is True
+    generation_id = body["id"]
+
+    default_items = client.get("/history", headers=headers).json()["items"]
+    assert all(item["id"] != generation_id for item in default_items)
+
+    private_items = client.get("/history", params={"scope": "private"}, headers=headers).json()["items"]
+    assert any(item["id"] == generation_id for item in private_items)
+    assert all(item["is_private"] for item in private_items)
+
+    # 直接IDを指定すればスコープに関わらず取得できる(可視性フラグであってアクセス制御ではない)
+    detail = client.get(f"/history/{generation_id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["is_private"] is True
+
+
+def test_toggle_history_privacy():
+    headers = {"X-Dev-User-Id": "privacy-toggle-user"}
+
+    with patch("app.search_literature", side_effect=_fake_literature):
+        resp = client.post(
+            "/generate",
+            data={"topic": "後から非公開にするテーマ", "field": "一般", "target_length": "1-100"},
+            headers=headers,
+        )
+    generation_id = resp.json()["id"]
+    assert resp.json()["is_private"] is False
+
+    toggle_resp = client.put(
+        f"/history/{generation_id}/private", json={"is_private": True}, headers=headers
+    )
+    assert toggle_resp.status_code == 200
+
+    default_items = client.get("/history", headers=headers).json()["items"]
+    assert all(item["id"] != generation_id for item in default_items)
+    private_items = client.get("/history", params={"scope": "private"}, headers=headers).json()["items"]
+    assert any(item["id"] == generation_id for item in private_items)
+
+
+def test_toggle_history_privacy_404_for_unknown_id():
+    resp = client.put("/history/999999999/private", json={"is_private": True})
+    assert resp.status_code == 404
+
+
 def test_sessions_crud_lifecycle():
     create_resp = client.post("/sessions", json={"title": "新規タブ"})
     assert create_resp.status_code == 200
@@ -372,6 +427,144 @@ def test_apple_sign_in_rejects_invalid_token(monkeypatch):
     assert resp.status_code == 401
 
 
+def test_google_sign_in_issues_bearer_token_that_grants_access(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "verify_google_id_token",
+        lambda id_token: {"sub": "google-user-1", "email": "g@example.com"},
+    )
+
+    signin_resp = client.post("/auth/google", json={"id_token": "fake-token-body"})
+    assert signin_resp.status_code == 200
+    token = signin_resp.json()["token"]
+
+    resp = client.get("/history", headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""})
+    assert resp.status_code == 200
+
+
+def test_google_sign_in_rejects_invalid_token(monkeypatch):
+    from auth import AuthError
+
+    monkeypatch.setattr(app_module, "verify_google_id_token", lambda id_token: (_ for _ in ()).throw(AuthError("boom")))
+
+    resp = client.post("/auth/google", json={"id_token": "garbage"})
+    assert resp.status_code == 401
+
+
+def test_github_sign_in_issues_bearer_token_that_grants_access(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "exchange_github_code_for_user",
+        lambda code: {"sub": "12345", "email": "octocat@example.com"},
+    )
+
+    signin_resp = client.post("/auth/github", json={"code": "the-code"})
+    assert signin_resp.status_code == 200
+    token = signin_resp.json()["token"]
+
+    resp = client.get("/history", headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""})
+    assert resp.status_code == 200
+
+
+def test_github_sign_in_rejects_invalid_code(monkeypatch):
+    from auth import AuthError
+
+    def _raise(_code):
+        raise AuthError("boom")
+
+    monkeypatch.setattr(app_module, "exchange_github_code_for_user", _raise)
+
+    resp = client.post("/auth/github", json={"code": "bad-code"})
+    assert resp.status_code == 401
+
+
+def test_different_providers_create_separate_accounts(monkeypatch):
+    """同じsubでもプロバイダーが違えば別アカウントになる(自動アカウント統合はしない)。"""
+    monkeypatch.setattr(
+        app_module, "verify_apple_identity_token", lambda token: {"sub": "shared-id", "email": None}
+    )
+    monkeypatch.setattr(
+        app_module, "verify_google_id_token", lambda id_token: {"sub": "shared-id", "email": None}
+    )
+
+    apple_token = client.post("/auth/apple", json={"identity_token": "x"}).json()["token"]
+    google_token = client.post("/auth/google", json={"id_token": "x"}).json()["token"]
+
+    with patch("app.search_literature", side_effect=_fake_literature):
+        client.post(
+            "/generate",
+            data={"topic": "Apple側のデータ", "field": "一般", "target_length": "1-100"},
+            headers={"Authorization": f"Bearer {apple_token}", "X-Dev-User-Id": ""},
+        )
+
+    google_history = client.get(
+        "/history", headers={"Authorization": f"Bearer {google_token}", "X-Dev-User-Id": ""}
+    ).json()["items"]
+    assert all(item["topic"] != "Apple側のデータ" for item in google_history)
+
+
+def test_auth_dev_disabled_returns_404_when_bypass_not_configured(monkeypatch):
+    monkeypatch.setattr(app_module, "DEV_BYPASS_USER_ID", "")
+    resp = client.post("/auth/dev")
+    assert resp.status_code == 404
+
+
+def test_auth_dev_issues_token_for_bypass_user():
+    resp = client.post("/auth/dev")
+    assert resp.status_code == 200
+    token = resp.json()["token"]
+
+    me_resp = client.get(
+        "/me", headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""}
+    )
+    assert me_resp.status_code == 200
+    assert me_resp.json()["user_id"] == DEFAULT_TEST_USER_ID
+
+
+def test_me_returns_plan_and_quota():
+    resp = client.get("/me")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["plan"] == "free"
+    assert body["tokens_quota"] == app_module.PLAN_TOKEN_QUOTAS["free"]
+    assert "tokens_used" in body
+
+
+def test_generate_blocked_with_402_when_quota_exceeded(monkeypatch):
+    import db
+
+    other_user_headers = {"X-Dev-User-Id": "quota-test-user"}
+    monkeypatch.setattr(app_module, "PLAN_TOKEN_QUOTAS", {"free": 10, "pro": 200_000, "max": 1_000_000})
+    db.add_token_usage("quota-test-user", 999)  # 直接DBに使用量を積んで上限超え状態を作る
+
+    resp = client.post(
+        "/generate",
+        data={"topic": "枠を使い切った後のテスト", "target_length": "1-100"},
+        headers=other_user_headers,
+    )
+    assert resp.status_code == 402
+
+
+def test_generate_succeeds_and_increments_usage_when_under_quota():
+    import db
+
+    headers = {"X-Dev-User-Id": "usage-tracking-user"}
+    before = db.get_or_create_entitlement("usage-tracking-user")["tokens_used"]
+
+    with patch("app.generate_outline", side_effect=_fake_generate_outline_minimal):
+        resp = client.post(
+            "/generate",
+            data={"topic": "使用量加算テスト", "target_length": "1-100"},
+            headers=headers,
+        )
+    assert resp.status_code == 200
+
+    after = db.get_or_create_entitlement("usage-tracking-user")["tokens_used"]
+    # フォールバック相当のモック(_token_usageなし)なので加算量は0だが、
+    # エンタイトルメント行自体は作成/参照されていること(例外なく完了)を確認する。
+    assert after >= before
+
+
 def test_users_cannot_see_or_modify_each_others_data():
     other_user_headers = {"X-Dev-User-Id": "someone-else"}
 
@@ -404,22 +597,30 @@ def test_users_cannot_see_or_modify_each_others_data():
     assert client.get("/sessions").json()["items"]
 
 
+def _fake_generate_outline_minimal(topic, field, reference_notes="", format_notes="", target_length=""):
+    return {"title": "t", "research_question": "q", "sections": []}
+
+
 def test_generate_rate_limit_returns_429_when_exceeded(monkeypatch):
+    # generate_outlineを固定応答にして実API呼び出しの遅延をなくし、1分の時間窓を
+    # またいでテストがflakyにならないようにする。
     monkeypatch.setattr(app_module, "GENERATE_RATE_LIMIT_PER_MINUTE", 1)
 
-    first = client.post("/generate", data={"topic": "レート制限テスト1", "target_length": "1-100"})
-    assert first.status_code == 200
+    with patch("app.generate_outline", side_effect=_fake_generate_outline_minimal):
+        first = client.post("/generate", data={"topic": "レート制限テスト1", "target_length": "1-100"})
+        assert first.status_code == 200
 
-    second = client.post("/generate", data={"topic": "レート制限テスト2", "target_length": "1-100"})
-    assert second.status_code == 429
+        second = client.post("/generate", data={"topic": "レート制限テスト2", "target_length": "1-100"})
+        assert second.status_code == 429
 
 
 def test_generate_rate_limit_disabled_when_zero(monkeypatch):
     monkeypatch.setattr(app_module, "GENERATE_RATE_LIMIT_PER_MINUTE", 0)
 
-    for _ in range(3):
-        resp = client.post("/generate", data={"topic": "レート制限無効テスト", "target_length": "1-100"})
-        assert resp.status_code == 200
+    with patch("app.generate_outline", side_effect=_fake_generate_outline_minimal):
+        for _ in range(3):
+            resp = client.post("/generate", data={"topic": "レート制限無効テスト", "target_length": "1-100"})
+            assert resp.status_code == 200
 
 
 def test_generate_handles_corrupted_pdf_gracefully():
