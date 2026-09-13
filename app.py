@@ -5,8 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
 
+import stripe
 from docx import Document
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -26,11 +27,14 @@ from db import (
     delete_session,
     get_generation,
     get_or_create_entitlement,
+    get_user_id_by_stripe_customer,
     init_db,
     list_generations,
     list_sessions,
     save_generation,
     set_generation_privacy,
+    set_plan,
+    set_stripe_customer,
     update_session,
     upsert_user,
 )
@@ -56,7 +60,7 @@ LENGTH_OPTIONS = [
 ]
 LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
 
-# 開発時のみ: この値を設定すると、Sign in with Appleを経ずに
+# 開発時のみ: この値を設定すると、Apple/Google/GitHubでのログインを経ずに
 # `X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってアクセスできる。
 # 本番環境では絶対に設定しないこと(誰でも他人になりすませてしまう)。
 DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
@@ -65,8 +69,24 @@ DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
 # 簡易レート制限(ユーザーごとの1分あたりの上限リクエスト数)。0以下で無効化。
 GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
 
-# 月額プランごとのトークン枠(仮の数値。決済連携までは set_plan で手動変更する)。
+# 月額プランごとのトークン枠(仮の数値)。
 PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 20_000, "pro": 200_000, "max": 1_000_000}
+
+# --- Stripe(サブスク課金) ---
+# 空のままなら/billing/*は503を返すだけで、それ以外の機能には一切影響しない。
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+# チェックアウト完了後にユーザーを戻す先(本番ではデプロイ先のフロントエンドURLを設定する)。
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173").rstrip("/")
+
+# Stripeで作成した月額プランのPrice ID。プラン名→Price ID、Price ID→プラン名の両方向で使う。
+STRIPE_PLAN_PRICE_IDS: Dict[str, str] = {
+    "pro": os.getenv("STRIPE_PRICE_ID_PRO", "").strip(),
+    "max": os.getenv("STRIPE_PRICE_ID_MAX", "").strip(),
+}
+STRIPE_PRICE_ID_TO_PLAN: Dict[str, str] = {
+    price_id: plan for plan, price_id in STRIPE_PLAN_PRICE_IDS.items() if price_id
+}
 
 _rate_limit_lock = Lock()
 _rate_limit_state: Dict[str, Tuple[int, int]] = {}
@@ -124,6 +144,10 @@ class GitHubSignInRequest(BaseModel):
 
 class PrivacyUpdate(BaseModel):
     is_private: bool
+
+
+class CheckoutRequest(BaseModel):
+    plan: str
 
 
 class SessionCreate(BaseModel):
@@ -354,6 +378,99 @@ def me(user_id: str = Depends(get_current_user)):
     entitlement = get_or_create_entitlement(user_id)
     quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
     return {**entitlement, "tokens_quota": quota}
+
+
+@app.post("/billing/checkout")
+def billing_checkout(payload: CheckoutRequest, user_id: str = Depends(get_current_user)):
+    """指定プランへのアップグレード用に、Stripe Checkoutのセッションを作成してURLを返す。"""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="決済機能はまだ設定されていません(STRIPE_SECRET_KEY未設定)")
+
+    price_id = STRIPE_PLAN_PRICE_IDS.get(payload.plan)
+    if not price_id:
+        raise HTTPException(status_code=400, detail=f"unknown or unconfigured plan: {payload.plan}")
+
+    entitlement = get_or_create_entitlement(user_id)
+    session_params = {
+        "mode": "subscription",
+        "line_items": [{"price": price_id, "quantity": 1}],
+        "success_url": f"{FRONTEND_ORIGIN}/?checkout=success",
+        "cancel_url": f"{FRONTEND_ORIGIN}/?checkout=cancel",
+        "client_reference_id": user_id,
+    }
+    if entitlement.get("stripe_customer_id"):
+        session_params["customer"] = entitlement["stripe_customer_id"]
+
+    try:
+        session = stripe.checkout.Session.create(**session_params)
+    except stripe.error.StripeError as exc:
+        raise HTTPException(status_code=502, detail=f"Stripeでの決済セッション作成に失敗しました: {exc}") from exc
+
+    return {"checkout_url": session.url}
+
+
+@app.post("/billing/portal")
+def billing_portal(user_id: str = Depends(get_current_user)):
+    """既存の契約を管理・解約するためのStripeカスタマーポータルのURLを返す。"""
+    if not stripe.api_key:
+        raise HTTPException(status_code=503, detail="決済機能はまだ設定されていません(STRIPE_SECRET_KEY未設定)")
+
+    entitlement = get_or_create_entitlement(user_id)
+    customer_id = entitlement.get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(status_code=400, detail="まだ決済履歴がありません")
+
+    try:
+        session = stripe.billing_portal.Session.create(customer=customer_id, return_url=FRONTEND_ORIGIN)
+    except stripe.error.StripeError as exc:
+        raise HTTPException(status_code=502, detail=f"Stripeカスタマーポータルの作成に失敗しました: {exc}") from exc
+
+    return {"portal_url": session.url}
+
+
+@app.post("/billing/webhook")
+async def billing_webhook(request: Request):
+    """Stripeからのイベント通知を受け取り、プラン変更をentitlementsに反映する。
+
+    このエンドポイントだけは(Stripeから直接叩かれるため)get_current_userを使わず、
+    代わりにStripeの署名検証(STRIPE_WEBHOOK_SECRET)で真正性を確認する。
+    """
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Webhookはまだ設定されていません(STRIPE_WEBHOOK_SECRET未設定)")
+
+    payload = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, signature, STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.error.SignatureVerificationError) as exc:
+        raise HTTPException(status_code=400, detail=f"invalid webhook payload: {exc}") from exc
+
+    event_type = event["type"]
+    data = event["data"]["object"]
+
+    if event_type == "checkout.session.completed":
+        user_id = data.get("client_reference_id")
+        customer_id = data.get("customer")
+        if user_id and customer_id:
+            set_stripe_customer(user_id, customer_id)
+
+    elif event_type in ("customer.subscription.created", "customer.subscription.updated"):
+        customer_id = data.get("customer")
+        items = data.get("items", {}).get("data", [])
+        price_id = items[0]["price"]["id"] if items else None
+        plan = STRIPE_PRICE_ID_TO_PLAN.get(price_id)
+        user_id = get_user_id_by_stripe_customer(customer_id) if customer_id else None
+        # サブスクが有効なステータスでなければ(未払い等)課金プランとして扱わない
+        if user_id and plan and data.get("status") in ("active", "trialing"):
+            set_plan(user_id, plan)
+
+    elif event_type == "customer.subscription.deleted":
+        customer_id = data.get("customer")
+        user_id = get_user_id_by_stripe_customer(customer_id) if customer_id else None
+        if user_id:
+            set_plan(user_id, "free")
+
+    return {"status": "ok"}
 
 
 @app.get("/sessions")

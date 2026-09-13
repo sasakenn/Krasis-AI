@@ -86,7 +86,8 @@ def init_db() -> None:
                 user_id TEXT PRIMARY KEY,
                 plan TEXT NOT NULL DEFAULT 'free',
                 tokens_used INTEGER NOT NULL DEFAULT 0,
-                period_start TEXT NOT NULL
+                period_start TEXT NOT NULL,
+                stripe_customer_id TEXT
             )
             """
         )
@@ -95,6 +96,7 @@ def init_db() -> None:
         _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
         _ensure_column(conn, "sessions", "user_id", "TEXT", backfill=LEGACY_USER_ID)
         _ensure_column(conn, "generations", "is_private", "INTEGER", backfill=0)
+        _ensure_column(conn, "entitlements", "stripe_customer_id", "TEXT")
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, ?)",
             (LEGACY_USER_ID, datetime.now(timezone.utc).isoformat()),
@@ -278,7 +280,7 @@ def get_or_create_entitlement(user_id: str) -> dict:
     now = datetime.now(timezone.utc)
     with _connect() as conn:
         row = conn.execute(
-            "SELECT user_id, plan, tokens_used, period_start FROM entitlements WHERE user_id = ?",
+            "SELECT user_id, plan, tokens_used, period_start, stripe_customer_id FROM entitlements WHERE user_id = ?",
             (user_id,),
         ).fetchone()
 
@@ -288,7 +290,13 @@ def get_or_create_entitlement(user_id: str) -> dict:
                 "INSERT INTO entitlements (user_id, plan, tokens_used, period_start) VALUES (?, ?, 0, ?)",
                 (user_id, DEFAULT_PLAN, now_iso),
             )
-            return {"user_id": user_id, "plan": DEFAULT_PLAN, "tokens_used": 0, "period_start": now_iso}
+            return {
+                "user_id": user_id,
+                "plan": DEFAULT_PLAN,
+                "tokens_used": 0,
+                "period_start": now_iso,
+                "stripe_customer_id": None,
+            }
 
         entitlement = dict(row)
         period_start = datetime.fromisoformat(entitlement["period_start"])
@@ -314,7 +322,27 @@ def add_token_usage(user_id: str, tokens: int) -> dict:
 
 
 def set_plan(user_id: str, plan: str) -> None:
-    """プランを変更する(現時点では手動操作用。将来は決済Webhookから呼ぶ想定)。"""
+    """プランを変更する。Stripe Webhookや手動操作から呼ばれる。"""
     get_or_create_entitlement(user_id)
     with _connect() as conn:
         conn.execute("UPDATE entitlements SET plan = ? WHERE user_id = ?", (plan, user_id))
+
+
+def set_stripe_customer(user_id: str, stripe_customer_id: str) -> None:
+    """StripeのCustomer IDをuser_idに紐付ける(Checkout完了時に一度だけ記録する)。"""
+    get_or_create_entitlement(user_id)
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE entitlements SET stripe_customer_id = ? WHERE user_id = ?",
+            (stripe_customer_id, user_id),
+        )
+
+
+def get_user_id_by_stripe_customer(stripe_customer_id: str) -> str | None:
+    """StripeのCustomer IDから、それに紐付くuser_idを逆引きする(Webhook処理で使う)。"""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id FROM entitlements WHERE stripe_customer_id = ?",
+            (stripe_customer_id,),
+        ).fetchone()
+    return row["user_id"] if row else None

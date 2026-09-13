@@ -675,6 +675,40 @@ export default function App() {
     if (authToken) fetchUsage()
   }, [authToken, fetchUsage])
 
+  const [billingLoading, setBillingLoading] = useState(false)
+
+  async function handleUpgrade(plan) {
+    setSidebarError(null)
+    setBillingLoading(true)
+    try {
+      const resp = await apiFetch('/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      window.location.href = data.checkout_url
+    } catch (err) {
+      setSidebarError(`アップグレードに失敗しました: ${String(err)}`)
+      setBillingLoading(false)
+    }
+  }
+
+  async function handleManageBilling() {
+    setSidebarError(null)
+    setBillingLoading(true)
+    try {
+      const resp = await apiFetch('/billing/portal', { method: 'POST' })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      window.location.href = data.portal_url
+    } catch (err) {
+      setSidebarError(`プラン管理画面を開けませんでした: ${String(err)}`)
+      setBillingLoading(false)
+    }
+  }
+
   // サイドバー系の裏側フェッチ(履歴・タブの読み込み/保存)は失敗しても画面が壊れないように
   // 個別にcatchしているが、原因(APIキー誤り・サーバー未接続など)が分かるようここに表示する。
   const [sidebarError, setSidebarError] = useState(null)
@@ -1066,6 +1100,39 @@ export default function App() {
                 {usage.tokens_used.toLocaleString()} / {usage.tokens_quota.toLocaleString()} トークン
               </div>
             )}
+
+            {usage?.plan === 'free' ? (
+              <div className="upgrade-buttons">
+                <button
+                  type="button"
+                  className="upgrade-button"
+                  disabled={billingLoading}
+                  onClick={() => handleUpgrade('pro')}
+                >
+                  Proにアップグレード
+                </button>
+                <button
+                  type="button"
+                  className="upgrade-button"
+                  disabled={billingLoading}
+                  onClick={() => handleUpgrade('max')}
+                >
+                  Maxにアップグレード
+                </button>
+              </div>
+            ) : (
+              usage && (
+                <button
+                  type="button"
+                  className="upgrade-button"
+                  disabled={billingLoading}
+                  onClick={handleManageBilling}
+                >
+                  プランを管理
+                </button>
+              )
+            )}
+
             <button type="button" className="logout-button" onClick={handleLogout}>
               ログアウト
             </button>

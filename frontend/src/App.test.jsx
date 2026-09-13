@@ -95,6 +95,14 @@ function mockFetch({ history = { items: [] }, generateResponses = [], sessions =
       return Promise.resolve(jsonResponse({ token: 'dev-token' }))
     }
 
+    if (url === '/billing/checkout' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ checkout_url: 'https://checkout.stripe.com/fake' }))
+    }
+
+    if (url === '/billing/portal' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ portal_url: 'https://billing.stripe.com/fake' }))
+    }
+
     if (typeof url === 'string' && url.startsWith('/history')) {
       const deleteMatch = url.match(/^\/history\/(\d+)$/)
       const privacyMatch = url.match(/^\/history\/(\d+)\/private$/)
@@ -338,6 +346,38 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByText(/Pro/)).toBeInTheDocument())
     expect(screen.getByText(/1,234 \/ 200,000 トークン/)).toBeInTheDocument()
+  })
+
+  it('shows upgrade buttons on the free plan and starts a Stripe checkout', async () => {
+    mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'free' } })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Proにアップグレード' })).toBeInTheDocument())
+    expect(screen.getByRole('button', { name: 'Maxにアップグレード' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'プランを管理' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Proにアップグレード' }))
+
+    await waitFor(() => {
+      const checkoutCall = global.fetch.mock.calls.find(([url]) => url === '/billing/checkout')
+      expect(checkoutCall).toBeTruthy()
+      expect(JSON.parse(checkoutCall[1].body)).toEqual({ plan: 'pro' })
+    })
+  })
+
+  it('shows a manage-billing button on a paid plan and opens the Stripe portal', async () => {
+    mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro' } })
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'プランを管理' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Proにアップグレード' })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'プランを管理' }))
+
+    await waitFor(() => {
+      const portalCall = global.fetch.mock.calls.find(([url]) => url === '/billing/portal')
+      expect(portalCall).toBeTruthy()
+    })
   })
 
   it('logs out and returns to the login screen', async () => {

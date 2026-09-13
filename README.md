@@ -122,7 +122,28 @@ curl http://127.0.0.1:8000/me -H "X-Dev-User-Id: local-dev-user"
 # → {"user_id": "...", "plan": "free", "tokens_used": 123, "period_start": "...", "tokens_quota": 20000}
 ```
 
-プラン枠は`app.py`の`PLAN_TOKEN_QUOTAS`で定義(デフォルト free=20,000 / pro=200,000 / max=1,000,000)。**現時点では決済(Stripe/StoreKit)は未接続**で、プラン変更は`db.py`の`set_plan(user_id, plan)`を直接呼ぶ手動運用です(将来、決済のWebhookから呼ぶ想定)。
+プラン枠は`app.py`の`PLAN_TOKEN_QUOTAS`で定義(デフォルト free=20,000 / pro=200,000 / max=1,000,000)。
+
+## 課金(Stripeサブスク)
+
+Pro/MaxプランはStripe Checkout(サブスク)で購入し、Stripe Webhookでの通知を受けて自動的にプランが切り替わります。`.env`の`STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID_PRO` / `STRIPE_PRICE_ID_MAX`が未設定の間は`/billing/*`は`503`を返すだけで、それ以外の機能(生成・履歴・ログイン等)には一切影響しません。
+
+**設定手順**(Stripeアカウント作成後):
+
+1. Stripeダッシュボードで月額プラン(商品)を2つ作成し、それぞれのPrice IDを`STRIPE_PRICE_ID_PRO` / `STRIPE_PRICE_ID_MAX`に設定
+2. ダッシュボードの「開発者」→「APIキー」からシークレットキーを取得し`STRIPE_SECRET_KEY`に設定
+3. Webhookエンドポイントとして `<公開URL>/billing/webhook` を登録し、発行された署名シークレットを`STRIPE_WEBHOOK_SECRET`に設定(ローカル確認には `stripe listen --forward-to localhost:8000/billing/webhook` が使える)
+4. `FRONTEND_ORIGIN`にフロントエンドの実際のURLを設定(Checkout/ポータル完了後の戻り先になる)
+
+```bash
+curl -X POST http://127.0.0.1:8000/billing/checkout -d '{"plan":"pro"}' -H 'Content-Type: application/json' -H "X-Dev-User-Id: local-dev-user"
+# → {"checkout_url": "https://checkout.stripe.com/..."}  フロントエンドはこのURLへリダイレクトする
+
+curl -X POST http://127.0.0.1:8000/billing/portal -H "X-Dev-User-Id: local-dev-user"
+# → {"portal_url": "https://billing.stripe.com/..."}  契約者向けの管理・解約ポータル
+```
+
+フロントエンドはFreeプランのユーザーにサイドバーで「Proにアップグレード」「Maxにアップグレード」ボタンを、契約者には「プランを管理」ボタンを表示します。Webhookが処理するイベントは `checkout.session.completed`(StripeのCustomer IDを紐付け)、`customer.subscription.created` / `.updated`(プラン反映、`active`/`trialing`以外のステータスは反映しない)、`customer.subscription.deleted`(freeへ自動ダウングレード)です。
 
 ## シークレット(非公開)履歴
 
@@ -182,18 +203,18 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/billing/checkout`, `/billing/portal`, `/billing/webhook`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
 - `auth.py`: Apple/Googleのidentity token検証(共通のOIDC検証ロジック)、GitHubの認可コード交換、アプリ独自セッションJWTの発行・検証。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。生成時のトークン利用量も返す。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
-- `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメントをSQLiteに保存・参照する。すべてuser_idでスコープされる。
-- `frontend/`: React(Vite)フロントエンド。強制ログイン制のSlack風チャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。
+- `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメント・Stripe顧客IDをSQLiteに保存・参照する。すべてuser_idでスコープされる。
+- `frontend/`: React(Vite)フロントエンド。強制ログイン制のSlack風チャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。サイドバーにプラン利用量・アップグレード導線もある。
 
 ## App Store公開に向けたロードマップ
 
-今回実装したのはマルチユーザー化 + マルチプロバイダーログイン + トークン利用量のゲート機構 + 非公開履歴。残りは以下の順で進める想定:
+今回実装したのはマルチユーザー化 + マルチプロバイダーログイン + トークン利用量のゲート機構 + 非公開履歴 + Stripeサブスク連携。残りは以下の想定(いずれもユーザー本人のアカウント作成・契約が前提):
 
-- サブスク課金の実接続(App Store Server Notifications V2 / Stripe Webhookからのプラン変更、`set_plan`の自動化)
+- Google Cloud Console / GitHub でのOAuthクライアント作成、Stripeアカウント開設・商品作成(いずれも無料、Stripeのみ本人確認あり)
 - クラウドへの常時デプロイ(Dockerfile・ホスティング・HTTPS)
-- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブログイン・StoreKit)
-- Apple Developer Program登録・App Store Connectでのアプリ/課金商品登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)
+- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブログイン・App Store向けにはStoreKit課金への切り替えが別途必要)
+- Apple Developer Program登録(有料、$99/年)・App Store Connectでのアプリ登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)

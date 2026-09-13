@@ -281,6 +281,23 @@ body {
   cursor: pointer;
 }
 .logout-button:hover { border-color: var(--accent-red); color: var(--accent-red); }
+.upgrade-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.upgrade-button {
+  border: 1px solid var(--accent-blue);
+  background: rgba(47, 129, 247, 0.12);
+  color: var(--accent-blue);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.upgrade-button:hover:not(:disabled) { background: rgba(47, 129, 247, 0.22); }
+.upgrade-button:disabled { opacity: 0.5; cursor: not-allowed; }
 .sidebar-settings-label {
   font-size: 11px;
   color: var(--text-muted);
