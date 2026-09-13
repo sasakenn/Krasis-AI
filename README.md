@@ -81,17 +81,30 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 `/generate` `/history*` `/sessions*` `/me` はすべて `Authorization: Bearer <token>` を要求し、`generations` / `sessions` はDB上でuser_idごとに分離されます(他人のデータは一覧にも出ないし、直接IDを指定しても404になります)。フロントエンドも強制ログイン制で、未ログインだと専用のログイン画面が表示されます。
 
-**ログイン方法は3つ**、いずれもフロントエンドのログイン画面から使えます:
+**ログイン方法は4つ**、いずれもフロントエンドのログイン画面から使えます:
 
-| プロバイダー | フロントエンドに必要な設定 | バックエンドに必要な設定 |
+| 方法 | フロントエンドに必要な設定 | バックエンドに必要な設定 |
 |---|---|---|
 | Apple | `frontend/.env` の `VITE_APPLE_CLIENT_ID` | `.env` の `APPLE_CLIENT_ID` |
 | Google | `frontend/.env` の `VITE_GOOGLE_CLIENT_ID` | `.env` の `GOOGLE_CLIENT_ID` |
 | GitHub | `frontend/.env` の `VITE_GITHUB_CLIENT_ID` / `VITE_GITHUB_REDIRECT_URI` | `.env` の `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` |
+| メール+ログインコード | 設定不要(常に使える) | 任意で`SMTP_*`(下記) |
 
 各プロバイダーのクライアントID等は無料で取得できます(Apple Developer Programは登録自体が有料の$99/年)。未設定のプロバイダーはログイン画面でボタンが無効表示になるだけで、他のプロバイダーやアプリ全体の動作には影響しません。
 
-**⚠️ 同じ人でもプロバイダーが違えば別アカウント扱いです**(例: Appleでログインした後にGoogleでログインしても、内部的には別ユーザーとしてデータが分かれます)。自動アカウント統合は未実装です。
+**⚠️ 同じ人でもプロバイダー(方法)が違えば別アカウント扱いです**(例: Appleでログインした後にGoogleでログインしても、内部的には別ユーザーとしてデータが分かれます)。自動アカウント統合は未実装です。
+
+### メール+ログインコードでのログイン
+
+Google/GitHubのアカウントを使いたくない場合向けに、外部アカウント不要のログイン方式も用意されています。ログイン画面で:
+
+1. **新規登録**: メールアドレスを入力すると、12桁の乱数コード(例: `a3f9e2b71c4d`)が発行されます。**この画面にしか表示されないので、その場で紙などに控えてください**(念のためメールにも同じコードを送ります)。「控えました。続ける」を押すとそのままログインします。
+2. **ログイン**: 登録済みのメールアドレス+コードでログインします。
+3. **コードを忘れた**: メールアドレスを入力すると新しいコードが発行され、メールで送られます(古いコードは失効します)。登録の有無を外部に漏らさないため、未登録のメールアドレスでも同じ完了メッセージが表示されます。
+
+コードは平文では保存されずSHA-256のハッシュのみDBに保持します。乱用防止のため、同じメールアドレスに対する新規登録・再発行は`CODE_AUTH_RATE_LIMIT_PER_MINUTE`(デフォルト5件/分)でレート制限されます。
+
+**メール送信の設定**(任意): `.env`の`SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM`を設定すると実際にメールが届きます(Gmailなら「アプリパスワード」が簡単)。未設定でも機能自体は問題なく動作し、コードは画面にも表示されるほか、メール本文はサーバーのログ(`logs/backend.log`)に出力されます。
 
 **ローカルでの動作確認**(実プロバイダーの認証情報が無くてもOK): `.env` に `DEV_BYPASS_USER_ID` を設定すると、
 
@@ -203,11 +216,12 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/billing/checkout`, `/billing/portal`, `/billing/webhook`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/auth/code/signup`, `/auth/code/login`, `/auth/code/reissue`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/billing/checkout`, `/billing/portal`, `/billing/webhook`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
 - `auth.py`: Apple/Googleのidentity token検証(共通のOIDC検証ロジック)、GitHubの認可コード交換、アプリ独自セッションJWTの発行・検証。
+- `mailer.py`: メール+ログインコード用の通知メール送信(SMTP設定があれば送信、無ければログ出力のみ)。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。生成時のトークン利用量も返す。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
-- `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメント・Stripe顧客IDをSQLiteに保存・参照する。すべてuser_idでスコープされる。
+- `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメント・Stripe顧客ID・メールログインコードをSQLiteに保存・参照する。すべてuser_idでスコープされる。
 - `frontend/`: React(Vite)フロントエンド。強制ログイン制のSlack風チャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。サイドバーにプラン利用量・アップグレード導線もある。
 
 ## App Store公開に向けたロードマップ

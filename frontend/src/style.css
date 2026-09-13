@@ -674,3 +674,89 @@ body {
   color: var(--text-muted);
   margin-top: -4px;
 }
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  width: 100%;
+}
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.code-auth {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.code-auth-tabs {
+  display: flex;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.code-auth-tabs button {
+  flex: 1;
+  border: none;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  padding: 6px 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.code-auth-tabs button + button { border-left: 1px solid var(--border-light); }
+.code-auth-tabs button.active { background: rgba(47, 129, 247, 0.16); color: var(--accent-blue); font-weight: 600; }
+
+.code-auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.code-auth-form input {
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+.code-auth-form input::placeholder { color: var(--text-muted); }
+.code-auth-form input:focus { outline: none; border-color: var(--accent-blue); }
+
+.code-issued {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--accent-red);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgba(242, 54, 69, 0.08);
+}
+.code-issued-warning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  text-align: center;
+}
+.code-issued-value {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px dashed var(--border-light);
+  border-radius: 6px;
+  padding: 10px 14px;
+  user-select: all;
+}

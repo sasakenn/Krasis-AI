@@ -91,6 +91,16 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS code_logins (
+                user_id TEXT PRIMARY KEY,
+                email TEXT NOT NULL UNIQUE,
+                code_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
         # 列追加前のDBファイルを引き続き使えるようにする簡易マイグレーション。
         _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
@@ -346,3 +356,29 @@ def get_user_id_by_stripe_customer(stripe_customer_id: str) -> str | None:
             (stripe_customer_id,),
         ).fetchone()
     return row["user_id"] if row else None
+
+
+def create_code_login(user_id: str, email: str, code_hash: str) -> None:
+    """メール+ログインコード方式の新規アカウントを作成する。emailは一意である必要がある。"""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO code_logins (user_id, email, code_hash, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, email, code_hash, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def get_code_login_by_email(email: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, email, code_hash FROM code_logins WHERE email = ?", (email,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def update_code_login_hash(user_id: str, new_code_hash: str) -> bool:
+    """コード再発行時に、ハッシュを新しい値に置き換える(古いコードは無効になる)。"""
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE code_logins SET code_hash = ? WHERE user_id = ?", (new_code_hash, user_id)
+        )
+        return cursor.rowcount > 0

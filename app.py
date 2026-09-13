@@ -1,6 +1,10 @@
+import hashlib
+import hmac
 import io
 import os
+import secrets
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from typing import Any, Dict, List, Optional, Tuple
@@ -22,9 +26,11 @@ from auth import (
 )
 from db import (
     add_token_usage,
+    create_code_login,
     create_session,
     delete_generation,
     delete_session,
+    get_code_login_by_email,
     get_generation,
     get_or_create_entitlement,
     get_user_id_by_stripe_customer,
@@ -35,9 +41,11 @@ from db import (
     set_generation_privacy,
     set_plan,
     set_stripe_customer,
+    update_code_login_hash,
     update_session,
     upsert_user,
 )
+from mailer import send_email
 from outline import generate_outline
 from search import search_literature
 
@@ -68,6 +76,10 @@ DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
 # /generate 1件あたりClaude APIを呼ぶため、誤操作や不具合でのコスト暴走を防ぐための
 # 簡易レート制限(ユーザーごとの1分あたりの上限リクエスト数)。0以下で無効化。
 GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
+
+# メール+ログインコード方式のサインアップ/再発行の乱用(他人のメールへの
+# スパム送信等)を防ぐための、メールアドレスごとの1分あたりの上限リクエスト数。
+CODE_AUTH_RATE_LIMIT_PER_MINUTE = int(os.getenv("CODE_AUTH_RATE_LIMIT_PER_MINUTE", "5"))
 
 # 月額プランごとのトークン枠(仮の数値)。
 PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 20_000, "pro": 200_000, "max": 1_000_000}
@@ -114,20 +126,39 @@ def get_current_user(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
-def _enforce_generate_rate_limit(key: str) -> None:
-    if GENERATE_RATE_LIMIT_PER_MINUTE <= 0:
+def _enforce_rate_limit(bucket: str, key: str, limit: int, message: str) -> None:
+    if limit <= 0:
         return
 
+    state_key = f"{bucket}:{key}"
     window = int(time.time() // 60)
     with _rate_limit_lock:
-        window_start, count = _rate_limit_state.get(key, (window, 0))
+        window_start, count = _rate_limit_state.get(state_key, (window, 0))
         if window_start != window:
             window_start, count = window, 0
         count += 1
-        _rate_limit_state[key] = (window_start, count)
+        _rate_limit_state[state_key] = (window_start, count)
 
-    if count > GENERATE_RATE_LIMIT_PER_MINUTE:
-        raise HTTPException(status_code=429, detail="generateのレート制限を超えました。しばらく待って再試行してください。")
+    if count > limit:
+        raise HTTPException(status_code=429, detail=message)
+
+
+def _enforce_generate_rate_limit(key: str) -> None:
+    _enforce_rate_limit(
+        "generate",
+        key,
+        GENERATE_RATE_LIMIT_PER_MINUTE,
+        "generateのレート制限を超えました。しばらく待って再試行してください。",
+    )
+
+
+def _enforce_code_auth_rate_limit(email: str) -> None:
+    _enforce_rate_limit(
+        "code-auth",
+        email,
+        CODE_AUTH_RATE_LIMIT_PER_MINUTE,
+        "リクエストが多すぎます。しばらく待って再試行してください。",
+    )
 
 
 class AppleSignInRequest(BaseModel):
@@ -140,6 +171,19 @@ class GoogleSignInRequest(BaseModel):
 
 class GitHubSignInRequest(BaseModel):
     code: str
+
+
+class CodeSignupRequest(BaseModel):
+    email: str
+
+
+class CodeLoginRequest(BaseModel):
+    email: str
+    code: str
+
+
+class CodeReissueRequest(BaseModel):
+    email: str
 
 
 class PrivacyUpdate(BaseModel):
@@ -283,6 +327,89 @@ def auth_dev():
     if not DEV_BYPASS_USER_ID:
         raise HTTPException(status_code=404, detail="not found")
     return {"token": create_app_token(DEV_BYPASS_USER_ID)}
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _generate_login_code() -> str:
+    """メール+コードログイン用の、紙にメモしやすい12桁(16進数)の乱数コードを生成する。"""
+    return secrets.token_hex(6)
+
+
+def _hash_code(code: str) -> str:
+    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+
+
+@app.post("/auth/code/signup")
+def auth_code_signup(payload: CodeSignupRequest):
+    """メールアドレスだけで新規アカウントを作り、ログイン用の乱数コードを発行する。
+
+    コードはAPIレスポンスでも返す(画面に表示して「紙にメモしてください」と
+    案内するため、パスワードマネージャーのマスターキー等と同様に一度きりの
+    表示になる)。あわせてメール(SMTP未設定ならログ出力)でも送る。
+    """
+    email = _normalize_email(payload.email)
+    if "@" not in email or len(email) < 3:
+        raise HTTPException(status_code=400, detail="有効なメールアドレスを入力してください")
+
+    _enforce_code_auth_rate_limit(email)
+
+    if get_code_login_by_email(email):
+        raise HTTPException(
+            status_code=409,
+            detail="このメールアドレスは既に登録されています。ログインまたはコードの再発行をご利用ください。",
+        )
+
+    user_id = f"code:{uuid.uuid4().hex}"
+    code = _generate_login_code()
+    create_code_login(user_id, email, _hash_code(code))
+    upsert_user(user_id, email)
+
+    send_email(
+        email,
+        "【Paper Assistant】ログインコードの発行",
+        f"あなたのログインコードは次の通りです:\n\n{code}\n\n"
+        "このコードはログインに必要です。他人に教えず、紙などに控えて安全に保管してください。",
+    )
+
+    return {"token": create_app_token(user_id), "code": code}
+
+
+@app.post("/auth/code/login")
+def auth_code_login(payload: CodeLoginRequest):
+    email = _normalize_email(payload.email)
+    _enforce_code_auth_rate_limit(email)
+
+    record = get_code_login_by_email(email)
+    if not record or not hmac.compare_digest(record["code_hash"], _hash_code(payload.code)):
+        raise HTTPException(status_code=401, detail="メールアドレスまたはコードが正しくありません")
+
+    return {"token": create_app_token(record["user_id"])}
+
+
+@app.post("/auth/code/reissue")
+def auth_code_reissue(payload: CodeReissueRequest):
+    """コードを忘れた場合、新しいコードを生成してメールで送り直す(古いコードは失効する)。
+
+    登録の有無を外部に漏らさないため、メールが未登録でも同じレスポンスを返す。
+    """
+    email = _normalize_email(payload.email)
+    _enforce_code_auth_rate_limit(email)
+
+    record = get_code_login_by_email(email)
+    if record:
+        new_code = _generate_login_code()
+        update_code_login_hash(record["user_id"], _hash_code(new_code))
+        send_email(
+            email,
+            "【Paper Assistant】ログインコードの再発行",
+            f"新しいログインコードは次の通りです:\n\n{new_code}\n\n"
+            "以前のコードは無効になりました。他人に教えず、紙などに控えて安全に保管してください。",
+        )
+
+    return {"message": "このメールアドレスが登録されていれば、新しいコードを送信しました。"}
 
 
 @app.post("/generate")

@@ -95,6 +95,20 @@ function mockFetch({ history = { items: [] }, generateResponses = [], sessions =
       return Promise.resolve(jsonResponse({ token: 'dev-token' }))
     }
 
+    if (url === '/auth/code/signup' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ token: 'code-signup-token', code: 'abc123def456' }))
+    }
+
+    if (url === '/auth/code/login' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ token: 'code-login-token' }))
+    }
+
+    if (url === '/auth/code/reissue' && method === 'POST') {
+      return Promise.resolve(
+        jsonResponse({ message: 'このメールアドレスが登録されていれば、新しいコードを送信しました。' })
+      )
+    }
+
     if (url === '/billing/checkout' && method === 'POST') {
       return Promise.resolve(jsonResponse({ checkout_url: 'https://checkout.stripe.com/fake' }))
     }
@@ -546,5 +560,55 @@ describe('LoginScreen', () => {
 
     expect(screen.getByRole('button', { name: /Appleでサインイン/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /GitHubでサインイン/ })).toBeDisabled()
+  })
+
+  it('signs up with email, shows the issued code once, and logs in after confirming', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByPlaceholderText('メールアドレス')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
+      target: { value: 'new-user@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'メールで登録してコードを発行' }))
+
+    await waitFor(() => expect(screen.getByText('abc123def456')).toBeInTheDocument())
+    expect(screen.getByText(/紙に控えてください/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '控えました。続ける' }))
+
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBe('code-signup-token')
+  })
+
+  it('logs in with an existing email and code', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'ログイン' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }))
+
+    fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
+      target: { value: 'existing-user@example.com' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('12桁のログインコード'), {
+      target: { value: 'abc123def456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'コードでログイン' }))
+
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBe('code-login-token')
+  })
+
+  it('requests a code reissue and shows the confirmation message', async () => {
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'コードを忘れた' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'コードを忘れた' }))
+
+    fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
+      target: { value: 'forgot-code@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'コードを再発行してメールで送る' }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/このメールアドレスが登録されていれば/)).toBeInTheDocument()
+    )
   })
 })

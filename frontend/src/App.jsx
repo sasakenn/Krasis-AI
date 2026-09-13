@@ -173,6 +173,83 @@ function LoginScreen({ onToken }) {
   const [error, setError] = useState(null)
   const [devLoading, setDevLoading] = useState(false)
 
+  // メールアドレス+乱数コードでのログイン(Google/GitHub等のアカウントを使いたくない場合向け)。
+  const [codeMode, setCodeMode] = useState('signup') // 'signup' | 'login' | 'forgot'
+  const [codeEmail, setCodeEmail] = useState('')
+  const [codeInput, setCodeInput] = useState('')
+  const [codeLoading, setCodeLoading] = useState(false)
+  const [issuedCode, setIssuedCode] = useState(null)
+  const [issuedToken, setIssuedToken] = useState(null)
+  const [reissueMessage, setReissueMessage] = useState(null)
+
+  function switchCodeMode(mode) {
+    setCodeMode(mode)
+    setError(null)
+    setReissueMessage(null)
+  }
+
+  async function handleCodeSignup(e) {
+    e.preventDefault()
+    setError(null)
+    setCodeLoading(true)
+    try {
+      const resp = await fetch('/auth/code/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: codeEmail }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      setIssuedCode(data.code)
+      setIssuedToken(data.token)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setCodeLoading(false)
+    }
+  }
+
+  async function handleCodeLogin(e) {
+    e.preventDefault()
+    setError(null)
+    setCodeLoading(true)
+    try {
+      const resp = await fetch('/auth/code/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: codeEmail, code: codeInput }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      onToken(data.token)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setCodeLoading(false)
+    }
+  }
+
+  async function handleCodeReissue(e) {
+    e.preventDefault()
+    setError(null)
+    setReissueMessage(null)
+    setCodeLoading(true)
+    try {
+      const resp = await fetch('/auth/code/reissue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: codeEmail }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      setReissueMessage(data.message)
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setCodeLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!appleClientId || !window.AppleID) return
     window.AppleID.auth.init({
@@ -287,6 +364,103 @@ function LoginScreen({ onToken }) {
             GitHubでサインイン
           </button>
           {!githubClientId && <small className="login-hint">サーバーでGITHUB_CLIENT_IDが未設定です</small>}
+
+          <div className="login-divider">または</div>
+
+          {issuedCode ? (
+            <div className="code-issued">
+              <p className="code-issued-warning">
+                ⚠️ この12桁のコードを今すぐ紙に控えてください。二度と表示されません(念のためメールにも送信済みです)。
+              </p>
+              <div className="code-issued-value">{issuedCode}</div>
+              <button
+                type="button"
+                className="login-button"
+                onClick={() => onToken(issuedToken)}
+              >
+                控えました。続ける
+              </button>
+            </div>
+          ) : (
+            <div className="code-auth">
+              <div className="code-auth-tabs">
+                <button
+                  type="button"
+                  className={codeMode === 'signup' ? 'active' : ''}
+                  onClick={() => switchCodeMode('signup')}
+                >
+                  新規登録
+                </button>
+                <button
+                  type="button"
+                  className={codeMode === 'login' ? 'active' : ''}
+                  onClick={() => switchCodeMode('login')}
+                >
+                  ログイン
+                </button>
+                <button
+                  type="button"
+                  className={codeMode === 'forgot' ? 'active' : ''}
+                  onClick={() => switchCodeMode('forgot')}
+                >
+                  コードを忘れた
+                </button>
+              </div>
+
+              {codeMode === 'signup' && (
+                <form className="code-auth-form" onSubmit={handleCodeSignup}>
+                  <input
+                    type="email"
+                    required
+                    placeholder="メールアドレス"
+                    value={codeEmail}
+                    onChange={(e) => setCodeEmail(e.target.value)}
+                  />
+                  <button type="submit" className="login-button" disabled={codeLoading}>
+                    {codeLoading ? '処理中…' : 'メールで登録してコードを発行'}
+                  </button>
+                </form>
+              )}
+
+              {codeMode === 'login' && (
+                <form className="code-auth-form" onSubmit={handleCodeLogin}>
+                  <input
+                    type="email"
+                    required
+                    placeholder="メールアドレス"
+                    value={codeEmail}
+                    onChange={(e) => setCodeEmail(e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    required
+                    placeholder="12桁のログインコード"
+                    value={codeInput}
+                    onChange={(e) => setCodeInput(e.target.value)}
+                  />
+                  <button type="submit" className="login-button" disabled={codeLoading}>
+                    {codeLoading ? '処理中…' : 'コードでログイン'}
+                  </button>
+                </form>
+              )}
+
+              {codeMode === 'forgot' && (
+                <form className="code-auth-form" onSubmit={handleCodeReissue}>
+                  <input
+                    type="email"
+                    required
+                    placeholder="メールアドレス"
+                    value={codeEmail}
+                    onChange={(e) => setCodeEmail(e.target.value)}
+                  />
+                  <button type="submit" className="login-button" disabled={codeLoading}>
+                    {codeLoading ? '処理中…' : 'コードを再発行してメールで送る'}
+                  </button>
+                  {reissueMessage && <p className="login-hint">{reissueMessage}</p>}
+                </form>
+              )}
+            </div>
+          )}
 
           {import.meta.env.DEV && (
             <button type="button" className="login-button login-button-dev" onClick={handleDevLogin} disabled={devLoading}>
