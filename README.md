@@ -216,11 +216,12 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 ## 構成
 
-- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/auth/code/signup`, `/auth/code/login`, `/auth/code/reissue`, `/generate`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/billing/checkout`, `/billing/portal`, `/billing/webhook`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
+- `app.py`: Web API(`/auth/apple`, `/auth/google`, `/auth/github`, `/auth/dev`, `/auth/code/signup`, `/auth/code/login`, `/auth/code/reissue`, `/generate`, `/generate/body`, `/course-chat`, `/tasks`, `/task-generator`, `/study-notes`, `/health`, `/history`, `/history/{id}`, `/history/{id}/private`, `/me`, `/billing/checkout`, `/billing/portal`, `/billing/webhook`, `/sessions`, `/sessions/{id}`)。ファイルアップロードの読み取り・OpenAlex検索の並列付加もここ。`frontend/dist/`が存在する場合はそれを`/`に静的マウントする。
 - `auth.py`: Apple/Googleのidentity token検証(共通のOIDC検証ロジック)、GitHubの認可コード交換、アプリ独自セッションJWTの発行・検証。
 - `mailer.py`: メール+ログインコード用の通知メール送信(SMTP設定があれば送信、無ければログ出力のみ)。
 - `outline.py`: Claudeを使ったアウトライン生成(`generate_outline`)。APIキー未設定時はルールベースのフォールバック。生成時のトークン利用量も返す。
 - `search.py`: OpenAlexで関連文献を検索(`search_literature`)。
+- `study_notes.py`: レポート・資料のテキストから、暗記すべき要点・全体の流れ(Mermaidのflowchart)・復習用の質問を整理する(`generate_study_notes`)。フロントエンドの`# study-notes`チャンネルからテキスト貼り付けまたはtxt/md/pdf/docxファイルの添付で利用できる。
 - `db.py`: ユーザー・生成履歴・タブ(セッション)・利用量エンタイトルメント・Stripe顧客ID・メールログインコードをSQLiteに保存・参照する。すべてuser_idでスコープされる。
 - `frontend/`: React(Vite)フロントエンド。強制ログイン制のSlack風チャットUIで、参考資料・フォーマット指定ファイル・プロンプトを送信できる。サイドバーにプラン利用量・アップグレード導線もある。
 
@@ -230,5 +231,12 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 
 - Google Cloud Console / GitHub でのOAuthクライアント作成、Stripeアカウント開設・商品作成(いずれも無料、Stripeのみ本人確認あり)
 - クラウドへの常時デプロイ(Dockerfile・ホスティング・HTTPS)
-- Capacitorで既存Reactをラップした iOS アプリ化(ネイティブログイン・App Store向けにはStoreKit課金への切り替えが別途必要)
+- Electronで既存Reactをラップした Mac/Windows版の配布設定を`desktop/`に追加済み。Mac App Store向けにはStoreKit課金への切り替えが別途必要
 - Apple Developer Program登録(有料、$99/年)・App Store Connectでのアプリ登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)
+
+### 課金・Mac/Windows配布
+
+- Web版と公式サイトからの直接配布は、実装済みのStripe Checkout / Customer Portalを利用する
+- Mac App Storeでデジタル機能を販売する場合は、Appleの規約上StoreKit課金を実装し、App Store Connectで商品を作成する
+- Windows版は`desktop/README.md`の手順でNSISインストーラーを作成できる。Microsoft Store提出には署名とストア用メタデータが必要
+- デスクトップ版からAPIを別ドメインへ接続する場合は、`frontend/.env`の`VITE_API_ORIGIN`を設定する。Stripe秘密鍵などのサーバー秘密情報はアプリに含めない

@@ -1,0 +1,38 @@
+{
+  "name": "paper-assistant-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Paper Assistant desktop shell",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist:mac": "npm run build:web && electron-builder --mac dmg",
+    "dist:win": "npm run build:web && electron-builder --win nsis",
+    "build:web": "npm --prefix ../frontend run build"
+  },
+  "devDependencies": {
+    "electron": "^36.3.2",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "jp.sasahiromichi.paperassistant",
+    "productName": "Paper Assistant",
+    "directories": { "output": "release" },
+    "files": ["main.cjs", "config.example.json"],
+    "extraResources": [
+      { "from": "../frontend/dist", "to": "frontend-dist" },
+      { "from": "config.example.json", "to": "config.example.json" }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": ["dmg"]
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

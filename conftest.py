@@ -28,8 +28,10 @@ def _reset_generate_rate_limit_state():
     import app as app_module
 
     app_module._rate_limit_state = {}
+    app_module._login_failure_state = {}
     yield
     app_module._rate_limit_state = {}
+    app_module._login_failure_state = {}
 
 
 @pytest.fixture

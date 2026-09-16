@@ -2,15 +2,98 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Paper Writing Assistant (Frontend)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light" />
+    <title>Novera</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📚</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
     <!-- Sign in with Apple / Googleでのサインインに使うJS SDK。クライアントID未設定時は
          そもそもボタンが無効化されるので、読み込めなくても本体の動作には影響しない。 -->
     <script async src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
     <script async src="https://accounts.google.com/gsi/client"></script>
+    <!-- 起動演出: 深いダーク背景の上を、白から金へ抜けるグラデーションの細い光の筋が
+         斜めに静かに流れるだけ。丸い光の点滅などは付けず、そのままフェードで本体へ引き渡す。
+         style.css(バンドル)を待たずに出したいのでここにインラインで定義する。 -->
+    <style>
+      #intro-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        overflow: hidden;
+        background: #08090b;
+        pointer-events: none;
+        animation: intro-splash-hide 1.75s cubic-bezier(.4, 0, .2, 1) forwards;
+      }
+
+      .intro-streak {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        height: 1.5px;
+        width: var(--len);
+        background: linear-gradient(90deg,
+          rgba(255, 255, 255, 0) 0%,
+          #ffffff 42%,
+          #f3c877 75%,
+          rgba(243, 200, 119, 0) 100%);
+        filter: drop-shadow(0 0 3px rgba(243, 200, 119, .55));
+        transform-origin: 0 50%;
+        opacity: 0;
+        animation: intro-streak-flow .95s cubic-bezier(.3, 0, .2, 1) var(--delay) forwards;
+      }
+      @keyframes intro-streak-flow {
+        0%   { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(-56vmin); opacity: 0; }
+        18%  { opacity: 1; }
+        68%  { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(8vmin); opacity: 1; }
+        100% { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(30vmin); opacity: 0; }
+      }
+
+      @keyframes intro-splash-hide {
+        0%, 76% { opacity: 1; visibility: visible; }
+        100% { opacity: 0; visibility: hidden; }
+      }
+
+      #intro-logo {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-family: 'IBM Plex Mono', ui-monospace, monospace;
+        font-size: clamp(26px, 5vw, 42px);
+        font-weight: 500;
+        letter-spacing: 0.28em;
+        color: #ffffff;
+        text-shadow: 0 0 24px rgba(243, 200, 119, .35);
+        opacity: 0;
+        animation: intro-logo-fade 1.1s cubic-bezier(.3, 0, .2, 1) .25s forwards;
+      }
+      @keyframes intro-logo-fade {
+        0%   { opacity: 0; letter-spacing: 0.5em; }
+        100% { opacity: 1; letter-spacing: 0.28em; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #intro-splash { animation-duration: .3s; }
+        .intro-streak { animation-duration: .2s; animation-delay: 0s; }
+        #intro-logo { animation-duration: .2s; animation-delay: 0s; }
+      }
+    </style>
   </head>
   <body>
+    <div id="intro-splash">
+      <div class="intro-streak" style="--angle:-62deg; --len:34vmin; --delay:0s"></div>
+      <div class="intro-streak" style="--angle:-28deg; --len:42vmin; --delay:.08s"></div>
+      <div class="intro-streak" style="--angle:-8deg;  --len:30vmin; --delay:.18s"></div>
+      <div class="intro-streak" style="--angle:18deg;  --len:46vmin; --delay:.05s"></div>
+      <div class="intro-streak" style="--angle:46deg;  --len:36vmin; --delay:.22s"></div>
+      <div class="intro-streak" style="--angle:78deg;  --len:40vmin; --delay:.12s"></div>
+      <div id="intro-logo">NOVERA</div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

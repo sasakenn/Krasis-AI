@@ -15,6 +15,8 @@ import os
 import sqlite3
 from datetime import datetime, timezone
 
+from crypto_utils import decrypt_text, encrypt_text
+
 DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "data", "app.db"))
 
 # マルチユーザー化(user_id列の追加)より前に作られた行の所有者として使う固定ID。
@@ -101,6 +103,44 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS mfa_enrollments (
+                user_id TEXT PRIMARY KEY,
+                secret TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                enabled_at TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS security_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                subject TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                description TEXT NOT NULL,
+                deadline TEXT,
+                estimated_minutes INTEGER NOT NULL,
+                remind_at TEXT NOT NULL,
+                reasoning TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending',
+                reminded_at TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
         # 列追加前のDBファイルを引き続き使えるようにする簡易マイグレーション。
         _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
@@ -127,6 +167,12 @@ def upsert_user(user_id: str, email: str | None) -> None:
             conn.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
 
 
+def get_user_email(user_id: str) -> str | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["email"] if row and row["email"] else None
+
+
 def save_generation(
     user_id: str,
     topic: str,
@@ -149,7 +195,7 @@ def save_generation(
                 field,
                 target_length,
                 outline.get("title", ""),
-                json.dumps(outline, ensure_ascii=False),
+                encrypt_text(json.dumps(outline, ensure_ascii=False)),
                 int(is_private),
             ),
         )
@@ -206,7 +252,7 @@ def get_generation(user_id: str, generation_id: int) -> dict | None:
         return None
 
     result = dict(row)
-    result["outline"] = json.loads(result.pop("outline_json"))
+    result["outline"] = json.loads(decrypt_text(result.pop("outline_json")))
     result["is_private"] = bool(result["is_private"])
     return result
 
@@ -382,3 +428,162 @@ def update_code_login_hash(user_id: str, new_code_hash: str) -> bool:
             "UPDATE code_logins SET code_hash = ? WHERE user_id = ?", (new_code_hash, user_id)
         )
         return cursor.rowcount > 0
+
+
+def create_task(
+    user_id: str,
+    description: str,
+    deadline: str | None,
+    estimated_minutes: int,
+    remind_at: str,
+    reasoning: str = "",
+) -> dict:
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO tasks
+                (user_id, description, deadline, estimated_minutes, remind_at, reasoning, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+            """,
+            (user_id, description, deadline, estimated_minutes, remind_at, reasoning, now),
+        )
+        return {
+            "id": cursor.lastrowid,
+            "description": description,
+            "deadline": deadline,
+            "estimated_minutes": estimated_minutes,
+            "remind_at": remind_at,
+            "reasoning": reasoning,
+            "status": "pending",
+            "reminded_at": None,
+            "created_at": now,
+        }
+
+
+def list_tasks(user_id: str) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, description, deadline, estimated_minutes, remind_at, reasoning,
+                   status, reminded_at, created_at
+            FROM tasks
+            WHERE user_id = ?
+            ORDER BY remind_at ASC
+            """,
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def set_task_status(user_id: str, task_id: int, status: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE tasks SET status = ? WHERE id = ? AND user_id = ?",
+            (status, task_id, user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_task(user_id: str, task_id: int) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
+        return cursor.rowcount > 0
+
+
+def list_due_reminders(now_iso: str) -> list[dict]:
+    """リマインド時刻を過ぎた未完了・未通知のタスクを、送信先メールアドレス付きで返す。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT tasks.id, tasks.description, tasks.deadline, tasks.estimated_minutes, users.email
+            FROM tasks
+            JOIN users ON users.id = tasks.user_id
+            WHERE tasks.status = 'pending' AND tasks.reminded_at IS NULL AND tasks.remind_at <= ?
+            """,
+            (now_iso,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def mark_task_reminded(task_id: int) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET reminded_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), task_id),
+        )
+
+
+def get_mfa_enrollment(user_id: str) -> dict | None:
+    """MFA登録行を返す(secretは復号済み)。未登録ならNone。"""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, secret, enabled, created_at, enabled_at FROM mfa_enrollments WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    result["secret"] = decrypt_text(result["secret"])
+    result["enabled"] = bool(result["enabled"])
+    return result
+
+
+def is_mfa_enabled(user_id: str) -> bool:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT enabled FROM mfa_enrollments WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    return bool(row and row["enabled"])
+
+
+def set_mfa_secret(user_id: str, secret: str) -> None:
+    """未確認状態(enabled=0)でシークレットを登録/置き換える。有効化済みの行は上書きしない想定で呼ぶ。"""
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO mfa_enrollments (user_id, secret, enabled, created_at, enabled_at)
+            VALUES (?, ?, 0, ?, NULL)
+            ON CONFLICT(user_id) DO UPDATE SET secret = excluded.secret, enabled = 0, enabled_at = NULL
+            """,
+            (user_id, encrypt_text(secret), datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def enable_mfa(user_id: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE mfa_enrollments SET enabled = 1, enabled_at = ? WHERE user_id = ?",
+            (datetime.now(timezone.utc).isoformat(), user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def delete_mfa(user_id: str) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM mfa_enrollments WHERE user_id = ?", (user_id,))
+        return cursor.rowcount > 0
+
+
+def record_security_event(event_type: str, subject: str, detail: str = "") -> None:
+    """ログイン失敗・ロック・MFA変更など、インシデント調査に必要な事象を記録する。"""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO security_events (created_at, event_type, subject, detail) VALUES (?, ?, ?, ?)",
+            (datetime.now(timezone.utc).isoformat(), event_type, subject, detail),
+        )
+
+
+def list_security_events(subject: str, limit: int = 20) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, created_at, event_type, detail
+            FROM security_events
+            WHERE subject = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (subject, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]

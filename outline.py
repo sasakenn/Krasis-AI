@@ -78,6 +78,8 @@ def _fallback_outline(topic: str, field: str = "一般") -> dict:
     s4 = f"{section_base} evaluation methods"
     s5 = f"{section_base} limitations and critique"
 
+    native_base = clean_topic if clean_topic else "このテーマ"
+
     return {
         "title": _guess_title(clean_topic),
         "research_question": f"{clean_topic if clean_topic else 'このテーマ'}において、主要な論点・背景・根拠は何か、どのように整理すべきか？",
@@ -85,32 +87,38 @@ def _fallback_outline(topic: str, field: str = "一般") -> dict:
             {
                 "heading": "問題設定と背景",
                 "purpose": "テーマの重要性、対象領域、既存の議論の前提を整理し、調査の軸を明確にする。",
-                "search_query": s1
+                "search_query": s1,
+                "search_query_native": f"{native_base} 背景",
             },
             {
                 "heading": "既存研究の整理",
                 "purpose": "関連する先行研究や実証事例を概観し、どの観点が重視されているかを把握する。",
-                "search_query": s2
+                "search_query": s2,
+                "search_query_native": f"{native_base} 先行研究",
             },
             {
                 "heading": "分析の枠組み",
                 "purpose": "テーマを整理するための概念、要因、因果関係の見立てを示し、論点を具体化する。",
-                "search_query": s3
+                "search_query": s3,
+                "search_query_native": f"{native_base} 分析枠組み",
             },
             {
                 "heading": "比較と検証",
                 "purpose": "複数の視点や事例を比較し、対象の特徴や差異、妥当性を検討する。",
-                "search_query": f"{section_base} comparison evaluation"
+                "search_query": f"{section_base} comparison evaluation",
+                "search_query_native": f"{native_base} 比較",
             },
             {
                 "heading": "課題と反論の検討",
                 "purpose": "限界、批判可能性、異論の余地を整理し、対話的に議論の妥当性を高める。",
-                "search_query": s5
+                "search_query": s5,
+                "search_query_native": f"{native_base} 課題",
             },
             {
                 "heading": "結論と今後の方向性",
                 "purpose": "整理した知見をまとめ、今後の論点や調査の方向性を示す。",
-                "search_query": f"{section_base} future research directions"
+                "search_query": f"{section_base} future research directions",
+                "search_query_native": f"{native_base} 今後の展望",
             }
         ]
     }
@@ -143,8 +151,11 @@ def _build_safe_prompt(
 - JSONのみを返す
 - 前後に説明文やコードブロック記号は付けない
 - 6つの節で構成し、背景・既存研究・分析枠組み・比較検証・反論の検討・結論を含める
-- 各節は以下のキーを持つ: heading, purpose, search_query
-- search_queryは英語の文献検索キーワードにし、3〜6語程度で具体的にする
+- 各節は以下のキーを持つ: heading, purpose, search_query, search_query_native
+- search_queryは英語の文献検索キーワードにし、3〜6語程度で具体的にする(国際的な文献を探すため)
+- search_query_nativeはテーマの言語(日本語)の文献検索キーワードにし、2〜5語程度で具体的にする
+  (国内で発行された文献も引用に含めるため。英語への機械的な逐語訳ではなく、その言語圏で
+  実際に使われる学術用語を使うこと)
 - 参考資料が提示されている場合は、その内容と矛盾しない構成にする
 - 論文フォーマット指定が提示されている場合は、その指定(節構成・分量など)を優先する
 
@@ -156,7 +167,8 @@ def _build_safe_prompt(
     {{
       "heading": "節の見出し",
       "purpose": "この節で扱う内容（1〜2文）",
-      "search_query": "英語検索キーワード"
+      "search_query": "英語検索キーワード",
+      "search_query_native": "日本語検索キーワード"
     }}
   ]
 }}"""

@@ -79,10 +79,76 @@ const DEFAULT_USAGE = {
   period_start: '2026-01-01T00:00:00+00:00',
 }
 
-function mockFetch({ history = { items: [] }, generateResponses = [], sessions = [], usage = DEFAULT_USAGE } = {}) {
+// /tasks への GET/POST/PUT/DELETE をインメモリで模倣する簡易フェイクバックエンド。
+function createFakeTasksBackend(initialTasks = []) {
+  let nextId = initialTasks.reduce((max, t) => Math.max(max, t.id), 0) + 1
+  const store = new Map(initialTasks.map((t) => [t.id, { ...t }]))
+
+  return {
+    store,
+    handle(url, options = {}) {
+      const method = options.method || 'GET'
+
+      if (url === '/tasks' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ items: Array.from(store.values()) }))
+      }
+      if (url === '/tasks' && method === 'POST') {
+        const body = JSON.parse(options.body)
+        const now = new Date()
+        const estimatedMinutes = 45
+        const remindAt = new Date(now.getTime() + estimatedMinutes * 60000).toISOString()
+        const task = {
+          id: nextId++,
+          description: body.description,
+          deadline: body.deadline || null,
+          estimated_minutes: estimatedMinutes,
+          remind_at: remindAt,
+          reasoning: 'テスト用の固定見積もりです。',
+          status: 'pending',
+          reminded_at: null,
+          created_at: now.toISOString(),
+        }
+        store.set(task.id, task)
+        return Promise.resolve(jsonResponse(task))
+      }
+
+      const statusMatch = url.match(/^\/tasks\/(\d+)\/status$/)
+      if (statusMatch && method === 'PUT') {
+        const id = Number(statusMatch[1])
+        const body = JSON.parse(options.body)
+        const task = store.get(id)
+        if (task) task.status = body.status
+        return Promise.resolve(jsonResponse({ status: 'ok' }))
+      }
+
+      const deleteMatch = url.match(/^\/tasks\/(\d+)$/)
+      if (deleteMatch && method === 'DELETE') {
+        store.delete(Number(deleteMatch[1]))
+        return Promise.resolve(jsonResponse({ status: 'deleted' }))
+      }
+
+      return null
+    },
+  }
+}
+
+const MFA_TEST_CODE = '123456'
+
+function mockFetch({
+  history = { items: [] },
+  generateResponses = [],
+  sessions = [],
+  tasks = [],
+  usage = DEFAULT_USAGE,
+  mfaRequiredOnLogin = false,
+  mfaInitialState = { enabled: false, pending: false },
+  securityEvents = [],
+} = {}) {
   let call = 0
   let historyItems = history.items.map((item) => ({ is_private: false, ...item }))
   const sessionsBackend = createFakeSessionsBackend(sessions)
+  const tasksBackend = createFakeTasksBackend(tasks)
+  const mfaState = { ...mfaInitialState }
 
   global.fetch = vi.fn((url, options = {}) => {
     const method = options.method || 'GET'
@@ -96,11 +162,57 @@ function mockFetch({ history = { items: [] }, generateResponses = [], sessions =
     }
 
     if (url === '/auth/code/signup' && method === 'POST') {
-      return Promise.resolve(jsonResponse({ token: 'code-signup-token', code: 'abc123def456' }))
+      return Promise.resolve(jsonResponse({ token: 'code-signup-token' }))
     }
 
     if (url === '/auth/code/login' && method === 'POST') {
+      if (mfaRequiredOnLogin) {
+        return Promise.resolve(jsonResponse({ mfa_required: true, mfa_token: 'pretend-mfa-token' }))
+      }
       return Promise.resolve(jsonResponse({ token: 'code-login-token' }))
+    }
+
+    if (url === '/auth/mfa/verify' && method === 'POST') {
+      const body = JSON.parse(options.body)
+      if (body.mfa_token === 'pretend-mfa-token' && body.code === MFA_TEST_CODE) {
+        return Promise.resolve(jsonResponse({ token: 'mfa-verified-token' }))
+      }
+      return Promise.resolve(jsonErrorResponse(401, '認証アプリのコードが正しくありません'))
+    }
+
+    if (url === '/auth/mfa/status' && method === 'GET') {
+      return Promise.resolve(jsonResponse({ ...mfaState }))
+    }
+
+    if (url === '/auth/mfa/setup' && method === 'POST') {
+      mfaState.pending = true
+      return Promise.resolve(
+        jsonResponse({ secret: 'ABCDEFGHIJKLMNOP', otpauth_url: 'otpauth://totp/Paper%20Assistant' })
+      )
+    }
+
+    if (url === '/auth/mfa/confirm' && method === 'POST') {
+      const body = JSON.parse(options.body)
+      if (body.code !== MFA_TEST_CODE) {
+        return Promise.resolve(jsonErrorResponse(400, '認証アプリのコードが正しくありません'))
+      }
+      mfaState.enabled = true
+      mfaState.pending = false
+      return Promise.resolve(jsonResponse({ enabled: true }))
+    }
+
+    if (url === '/auth/mfa/disable' && method === 'POST') {
+      const body = JSON.parse(options.body)
+      if (body.code !== MFA_TEST_CODE) {
+        return Promise.resolve(jsonErrorResponse(401, '認証アプリのコードが正しくありません'))
+      }
+      mfaState.enabled = false
+      mfaState.pending = false
+      return Promise.resolve(jsonResponse({ enabled: false }))
+    }
+
+    if (url === '/auth/security-events' && method === 'GET') {
+      return Promise.resolve(jsonResponse({ items: securityEvents }))
     }
 
     if (url === '/auth/code/reissue' && method === 'POST') {
@@ -151,12 +263,17 @@ function mockFetch({ history = { items: [] }, generateResponses = [], sessions =
       if (result) return result
     }
 
+    if (typeof url === 'string' && url.startsWith('/tasks')) {
+      const result = tasksBackend.handle(url, options)
+      if (result) return result
+    }
+
     const response = generateResponses[call]
     call += 1
     return Promise.resolve(response)
   })
 
-  return { sessionsBackend }
+  return { sessionsBackend, tasksBackend }
 }
 
 async function submitTopic(topic = '生成AIと教育') {
@@ -230,17 +347,23 @@ describe('App', () => {
     expect(screen.getAllByText('生成AIと教育').length).toBeGreaterThan(0)
   })
 
-  it('supports opening and closing tabs', async () => {
+  it('starts a fresh thread in a new tab, keeping the previous one reachable', async () => {
+    mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
     render(<App />)
-    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
+    await submitTopic('生成AIと教育')
+    await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
+    expect(screen.getAllByText('生成AIと教育').length).toBeGreaterThan(0)
 
-    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
-    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(2))
+    // 未送信の下書き(分量待ちの一時状態)が残っているので、新規スレッドの作成は確認を挟む
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    fireEvent.click(screen.getByRole('button', { name: '新規スレッド' }))
 
-    const tabs = screen.getAllByText('新規タブ')
-    const secondTab = tabs[1].closest('.tab')
-    fireEvent.click(within(secondTab).getByRole('button', { name: 'タブ「新規タブ」を閉じる' }))
-    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
+    // 新しいタブがアクティブになり、そのスレッドの中身(長さの質問)は消える
+    await waitFor(() => expect(screen.queryByText(LENGTH_QUESTION_RESPONSE.message)).not.toBeInTheDocument())
+    expect(screen.getByText(/下のボックスにテーマを入力し/)).toBeInTheDocument()
+    // 前のタブ自体はタブバーに残り、タブ名としてテーマがまだ1箇所だけ表示される
+    expect(screen.getAllByText('生成AIと教育')).toHaveLength(1)
+    confirmSpy.mockRestore()
   })
 
   it('lists server-side history and opens an item in a new tab', async () => {
@@ -358,8 +481,8 @@ describe('App', () => {
     mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro', tokens_used: 1234, tokens_quota: 200000 } })
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText(/Pro/)).toBeInTheDocument())
-    expect(screen.getByText(/1,234 \/ 200,000 トークン/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('PRO')).toBeInTheDocument())
+    expect(screen.getByText('1,234 / 200,000')).toBeInTheDocument()
   })
 
   it('shows upgrade buttons on the free plan and starts a Stripe checkout', async () => {
@@ -409,7 +532,7 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
 
     global.fetch = vi.fn(() => Promise.resolve(jsonErrorResponse(401, 'token expired')))
-    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
+    fireEvent.click(screen.getByRole('button', { name: '新規スレッド' }))
 
     await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBeNull()
@@ -507,25 +630,21 @@ describe('App', () => {
     confirmSpy.mockRestore()
   })
 
-  it('asks for confirmation before switching tabs with unsaved composer input', async () => {
+  it('asks for confirmation before starting a new thread with unsaved composer input', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(1))
-
-    fireEvent.click(screen.getByRole('button', { name: '新しいタブを追加' }))
-    await waitFor(() => expect(screen.getAllByText('新規タブ')).toHaveLength(2))
+    await waitFor(() => expect(screen.getAllByText('新規タブ').length).toBeGreaterThan(0))
 
     const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
     fireEvent.change(textarea, { target: { value: '未送信の下書き' } })
 
-    const firstTabEl = screen.getAllByText('新規タブ')[0].closest('.tab')
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
 
-    fireEvent.click(firstTabEl)
+    fireEvent.click(screen.getByRole('button', { name: '新規スレッド' }))
     expect(confirmSpy).toHaveBeenCalled()
-    expect(textarea).toHaveValue('未送信の下書き') // キャンセルしたのでタブは切り替わらない
+    expect(textarea).toHaveValue('未送信の下書き') // キャンセルしたのでスレッドは変わらない
 
     confirmSpy.mockReturnValue(true)
-    fireEvent.click(firstTabEl)
+    fireEvent.click(screen.getByRole('button', { name: '新規スレッド' }))
     await waitFor(() => expect(screen.queryByDisplayValue('未送信の下書き')).not.toBeInTheDocument())
 
     confirmSpy.mockRestore()
@@ -562,19 +681,14 @@ describe('LoginScreen', () => {
     expect(screen.getByRole('button', { name: /GitHubでサインイン/ })).toBeDisabled()
   })
 
-  it('signs up with email, shows the issued code once, and logs in after confirming', async () => {
+  it('signs up with email and logs in immediately without showing any code', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByPlaceholderText('メールアドレス')).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
       target: { value: 'new-user@example.com' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'メールで登録してコードを発行' }))
-
-    await waitFor(() => expect(screen.getByText('abc123def456')).toBeInTheDocument())
-    expect(screen.getByText(/紙に控えてください/)).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('button', { name: '控えました。続ける' }))
+    fireEvent.click(screen.getByRole('button', { name: 'メールで登録してログインコードを発行' }))
 
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('code-signup-token')
@@ -591,7 +705,7 @@ describe('LoginScreen', () => {
     fireEvent.change(screen.getByPlaceholderText('12桁のログインコード'), {
       target: { value: 'abc123def456' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'コードでログイン' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードでログイン' }))
 
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('code-login-token')
@@ -599,16 +713,197 @@ describe('LoginScreen', () => {
 
   it('requests a code reissue and shows the confirmation message', async () => {
     render(<App />)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'コードを忘れた' })).toBeInTheDocument())
-    fireEvent.click(screen.getByRole('button', { name: 'コードを忘れた' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'ログインコードを忘れた' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードを忘れた' }))
 
     fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
       target: { value: 'forgot-code@example.com' },
     })
-    fireEvent.click(screen.getByRole('button', { name: 'コードを再発行してメールで送る' }))
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードを再発行してメールで送る' }))
 
     await waitFor(() =>
       expect(screen.getByText(/このメールアドレスが登録されていれば/)).toBeInTheDocument()
     )
+  })
+})
+
+describe('TaskReminders', () => {
+  async function openTaskChannel() {
+    render(<App />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '# task-reminders' })).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('button', { name: '# task-reminders' }))
+    await waitFor(() => expect(screen.getByText('まだタスクがありません。上のフォームから追加してください。')).toBeInTheDocument())
+  }
+
+  it('creates a task and shows the estimated time returned by the server', async () => {
+    await openTaskChannel()
+
+    fireEvent.change(screen.getByPlaceholderText(/経済学のレポート/), {
+      target: { value: '統計学のレポートを書く' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'AIに見積もってもらう' }))
+
+    await waitFor(() => expect(screen.getByText('統計学のレポートを書く')).toBeInTheDocument())
+    expect(screen.getByText(/所要時間の目安: 約45分/)).toBeInTheDocument()
+    expect(screen.getByText('テスト用の固定見積もりです。')).toBeInTheDocument()
+  })
+
+  it('toggles a task to done and back to pending', async () => {
+    await openTaskChannel()
+
+    fireEvent.change(screen.getByPlaceholderText(/経済学のレポート/), {
+      target: { value: '完了させるタスク' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'AIに見積もってもらう' }))
+    await waitFor(() => expect(screen.getByText('完了させるタスク')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '完了にする' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '未完了に戻す' })).toBeInTheDocument())
+
+    const taskItem = screen.getByText('完了させるタスク').closest('li')
+    expect(taskItem).toHaveClass('task-item-done')
+  })
+
+  it('deletes a task from the list', async () => {
+    await openTaskChannel()
+
+    fireEvent.change(screen.getByPlaceholderText(/経済学のレポート/), {
+      target: { value: '削除するタスク' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'AIに見積もってもらう' }))
+    await waitFor(() => expect(screen.getByText('削除するタスク')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '🗑' }))
+    await waitFor(() => expect(screen.queryByText('削除するタスク')).not.toBeInTheDocument())
+  })
+
+  it('loads existing tasks from the server on open', async () => {
+    mockFetch({
+      tasks: [
+        {
+          id: 99,
+          description: '既存のタスク',
+          deadline: null,
+          estimated_minutes: 30,
+          remind_at: new Date(Date.now() + 30 * 60000).toISOString(),
+          reasoning: '',
+          status: 'pending',
+          reminded_at: null,
+          created_at: new Date().toISOString(),
+        },
+      ],
+    })
+
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: '# task-reminders' }))
+    await waitFor(() => expect(screen.getByText('既存のタスク')).toBeInTheDocument())
+  })
+})
+
+describe('MFA login flow', () => {
+  beforeEach(() => {
+    localStorage.removeItem('paper-assistant-token')
+  })
+
+  it('asks for an authenticator code when the account has MFA enabled, then logs in', async () => {
+    mockFetch({ mfaRequiredOnLogin: true })
+    render(<App />)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'ログイン' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: 'ログイン' }))
+
+    fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
+      target: { value: 'mfa-user@example.com' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('12桁のログインコード'), {
+      target: { value: 'abc123def456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードでログイン' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('認証アプリに表示されている6桁のコードを入力してください')).toBeInTheDocument()
+    )
+    expect(localStorage.getItem('paper-assistant-token')).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText('6桁のコード'), { target: { value: MFA_TEST_CODE } })
+    fireEvent.click(screen.getByRole('button', { name: 'コードを確認してログイン' }))
+
+    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBe('mfa-verified-token')
+  })
+
+  it('shows an error and lets the user retry on a wrong authenticator code', async () => {
+    mockFetch({ mfaRequiredOnLogin: true })
+    render(<App />)
+    fireEvent.click(await screen.findByRole('button', { name: 'ログイン' }))
+    fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
+      target: { value: 'mfa-user@example.com' },
+    })
+    fireEvent.change(screen.getByPlaceholderText('12桁のログインコード'), {
+      target: { value: 'abc123def456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードでログイン' }))
+    await screen.findByPlaceholderText('6桁のコード')
+
+    fireEvent.change(screen.getByPlaceholderText('6桁のコード'), { target: { value: '000000' } })
+    fireEvent.click(screen.getByRole('button', { name: 'コードを確認してログイン' }))
+
+    await waitFor(() => expect(screen.getByText(/認証アプリのコードが正しくありません/)).toBeInTheDocument())
+    expect(localStorage.getItem('paper-assistant-token')).toBeNull()
+  })
+})
+
+describe('SecuritySettings', () => {
+  async function openSecurityPanel() {
+    render(<App />)
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '🔒 セキュリティ設定' })).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('button', { name: '🔒 セキュリティ設定' }))
+    await waitFor(() => expect(screen.getByText('多要素認証(認証アプリ)')).toBeInTheDocument())
+  }
+
+  it('sets up and enables MFA with the confirmation code', async () => {
+    mockFetch()
+    await openSecurityPanel()
+
+    await waitFor(() => expect(screen.getByText('現在、無効です。')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '多要素認証を設定する' }))
+
+    await waitFor(() => expect(screen.getByText('ABCDEFGHIJKLMNOP')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByPlaceholderText('表示された6桁のコード'), {
+      target: { value: MFA_TEST_CODE },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'コードを確認して有効化' }))
+
+    await waitFor(() => expect(screen.getByText('多要素認証を有効にしました。')).toBeInTheDocument())
+    expect(screen.getByText('✓ 有効になっています')).toBeInTheDocument()
+  })
+
+  it('disables MFA when already enabled, given the correct code', async () => {
+    mockFetch({ mfaInitialState: { enabled: true, pending: false } })
+    await openSecurityPanel()
+
+    await waitFor(() => expect(screen.getByText('✓ 有効になっています')).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText('無効にするには現在の6桁コード'), {
+      target: { value: MFA_TEST_CODE },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '多要素認証を無効にする' }))
+
+    await waitFor(() => expect(screen.getByText('多要素認証を無効にしました。')).toBeInTheDocument())
+    expect(screen.getByText('現在、無効です。')).toBeInTheDocument()
+  })
+
+  it('shows recent security events', async () => {
+    mockFetch({
+      securityEvents: [
+        { id: 1, created_at: new Date().toISOString(), event_type: 'login_failed', detail: '' },
+      ],
+    })
+    await openSecurityPanel()
+
+    await waitFor(() => expect(screen.getByText('ログイン失敗')).toBeInTheDocument())
   })
 })

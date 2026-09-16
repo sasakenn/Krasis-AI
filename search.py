@@ -50,13 +50,15 @@ def _restore_abstract(inverted_index: dict | None) -> str:
     return " ".join(words)
 
 
-def search_literature(query: str, limit: int = 5) -> list[dict]:
+def search_literature(query: str, limit: int = 5, language: str | None = None) -> list[dict]:
     """
     OpenAlex で文献を検索し、関連度の高い順に上位 `limit` 件を返す。
 
     引数:
         query: 検索キーワード(英語推奨。例: "large language model reasoning")
         limit: 取得する文献数(デフォルト5件)
+        language: 指定すると、その言語(ISO 639-1、例: "ja")で書かれた文献に絞り込む。
+            Noneなら言語を問わず検索する。
 
     戻り値:
         以下のキーを持つ辞書のリスト。
@@ -66,11 +68,14 @@ def search_literature(query: str, limit: int = 5) -> list[dict]:
         - doi:      DOI(取得できない場合は None)
         - abstract: 抄録(復元済みのテキスト。取得できない場合は空文字列)
         - url:      OpenAlex 上の文献ページのURL(引用実在チェックにも使える)
+        - language: 文献の言語コード(取得できない場合は None)
     """
     params = {
         "search": query,
         "per-page": limit,
     }
+    if language:
+        params["filter"] = f"language:{language}"
     if MAILTO:
         params["mailto"] = MAILTO
 
@@ -93,9 +98,62 @@ def search_literature(query: str, limit: int = 5) -> list[dict]:
             "doi": work.get("doi"),
             "abstract": _restore_abstract(work.get("abstract_inverted_index")),
             "url": work.get("id", ""),
+            "language": work.get("language"),
         })
 
     return literature
+
+
+def search_literature_diverse(
+    query_international: str,
+    query_native: str = "",
+    limit: int = 5,
+    native_language: str = "ja",
+) -> list[dict]:
+    """
+    国際的な(主に英語の)文献と、テーマの言語圏で発行された文献の両方を検索し、
+    発行元の国・言語をなるべく偏らせずに `limit` 件にまとめて返す。
+
+    query_nativeが空、またはnative_language分の検索が失敗した場合は、
+    query_internationalの結果だけで埋める(呼び出し元に影響を出さないため)。
+    重複(DOIまたはURLが一致)は除いて、国際版→国内版の順に交互で採用する。
+    """
+    native_limit = limit // 2 if query_native.strip() else 0
+    international_limit = limit - native_limit
+
+    international = search_literature(query_international, limit=international_limit)
+
+    native = []
+    if native_limit > 0:
+        try:
+            native = search_literature(query_native, limit=native_limit, language=native_language)
+        except Exception:
+            native = []
+
+    seen_keys = set()
+    merged = []
+    for paper in native + international:
+        key = paper.get("doi") or paper.get("url")
+        if key and key in seen_keys:
+            continue
+        if key:
+            seen_keys.add(key)
+        merged.append(paper)
+
+    if len(merged) < limit:
+        shortfall = limit - len(merged)
+        backfill = search_literature(query_international, limit=international_limit + shortfall)
+        for paper in backfill:
+            if len(merged) >= limit:
+                break
+            key = paper.get("doi") or paper.get("url")
+            if key and key in seen_keys:
+                continue
+            if key:
+                seen_keys.add(key)
+            merged.append(paper)
+
+    return merged[:limit]
 
 
 # --- 動作確認用(このファイルを直接実行したときだけ動く) ---

@@ -48,6 +48,10 @@ GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "").strip()
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 APP_TOKEN_TTL = timedelta(days=30)
 
+# MFA(認証アプリのコード)入力待ちの間だけ有効な、短命の「仮認証」トークンの有効期限。
+MFA_TOKEN_TTL = timedelta(minutes=5)
+MFA_TOKEN_PURPOSE = "mfa"
+
 # 各社のJWKS(公開鍵一式)はJWKS URLごとにPyJWKClientをキャッシュする
 # (PyJWKClient自体も直近のレスポンスをプロセス内にキャッシュする)。
 _jwks_clients: dict[str, PyJWKClient] = {}
@@ -188,4 +192,37 @@ def decode_app_token(token: str) -> str:
     user_id = payload.get("sub")
     if not user_id:
         raise AuthError("session token is missing 'sub' claim")
+    # MFA入力待ちの仮認証トークンをセッショントークンとして使われないようにする。
+    if payload.get("purpose"):
+        raise AuthError("token is not a session token")
     return user_id
+
+
+def create_mfa_token(user_id: str) -> str:
+    """ログインコードは正しいがMFAの確認が残っている状態を表す、短命の仮認証トークンを発行する。"""
+    if not JWT_SECRET:
+        raise AuthError("JWT_SECRET is not configured on the server")
+
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": user_id,
+        "purpose": MFA_TOKEN_PURPOSE,
+        "iat": int(now.timestamp()),
+        "exp": int((now + MFA_TOKEN_TTL).timestamp()),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def decode_mfa_token(token: str) -> str:
+    """仮認証トークンを検証し、user_idを返す。セッショントークン等の別用途のJWTは受け付けない。"""
+    if not JWT_SECRET:
+        raise AuthError("JWT_SECRET is not configured on the server")
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError as exc:
+        raise AuthError(f"invalid mfa token: {exc}") from exc
+
+    if payload.get("purpose") != MFA_TOKEN_PURPOSE or not payload.get("sub"):
+        raise AuthError("token is not an mfa token")
+    return payload["sub"]

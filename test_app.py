@@ -58,10 +58,10 @@ def _build_minimal_docx(text: str) -> bytes:
     return buf.getvalue()
 
 
-def _fake_literature(query: str, limit: int = 3):
+def _fake_literature(query_international: str, query_native: str = "", limit: int = 3, native_language: str = "ja"):
     return [
         {
-            "title": f"Paper about {query}",
+            "title": f"Paper about {query_international}",
             "authors": ["Alice Example"],
             "year": 2024,
             "doi": None,
@@ -95,7 +95,7 @@ def test_generate_rejects_invalid_target_length():
 
 
 def test_generate_attaches_literature_to_each_section():
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
@@ -112,7 +112,7 @@ def test_generate_attaches_literature_to_each_section():
 
 
 def test_generate_section_literature_falls_back_to_empty_list_on_error():
-    with patch("app.search_literature", side_effect=RuntimeError("network down")):
+    with patch("app.search_literature_diverse", side_effect=RuntimeError("network down")):
         resp = client.post(
             "/generate",
             data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
@@ -216,7 +216,7 @@ def test_generate_extracts_docx_text():
 
 
 def test_generate_persists_to_history_and_can_be_fetched_back():
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
@@ -247,7 +247,7 @@ def test_history_detail_404_for_unknown_id():
 
 
 def test_history_delete_removes_item():
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "生成AIと教育", "field": "教育技術", "target_length": "1001-3000"},
@@ -268,7 +268,7 @@ def test_history_delete_404_for_unknown_id():
 
 
 def test_history_search_filters_by_topic_and_title():
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         client.post(
             "/generate",
             data={"topic": "検索対象トピックabc123", "field": "一般", "target_length": "1-100"},
@@ -288,7 +288,7 @@ def test_history_search_filters_by_topic_and_title():
 def test_private_generation_is_hidden_from_default_history_but_visible_in_private_scope():
     headers = {"X-Dev-User-Id": "private-history-user"}
 
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "非公開にするテーマ", "field": "一般", "target_length": "1-100", "private": "true"},
@@ -315,7 +315,7 @@ def test_private_generation_is_hidden_from_default_history_but_visible_in_privat
 def test_toggle_history_privacy():
     headers = {"X-Dev-User-Id": "privacy-toggle-user"}
 
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "後から非公開にするテーマ", "field": "一般", "target_length": "1-100"},
@@ -490,7 +490,7 @@ def test_different_providers_create_separate_accounts(monkeypatch):
     apple_token = client.post("/auth/apple", json={"identity_token": "x"}).json()["token"]
     google_token = client.post("/auth/google", json={"id_token": "x"}).json()["token"]
 
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         client.post(
             "/generate",
             data={"topic": "Apple側のデータ", "field": "一般", "target_length": "1-100"},
@@ -568,7 +568,7 @@ def test_generate_succeeds_and_increments_usage_when_under_quota():
 def test_users_cannot_see_or_modify_each_others_data():
     other_user_headers = {"X-Dev-User-Id": "someone-else"}
 
-    with patch("app.search_literature", side_effect=_fake_literature):
+    with patch("app.search_literature_diverse", side_effect=_fake_literature):
         resp = client.post(
             "/generate",
             data={"topic": "他人に見せたくないテーマ", "field": "一般", "target_length": "1-100"},
@@ -640,3 +640,300 @@ def test_generate_handles_corrupted_pdf_gracefully():
     assert resp.status_code == 200
     assert "broken.pdf" in captured["reference_notes"]
     assert "PDFの読み取りに失敗しました" in captured["reference_notes"]
+
+
+def _fake_answer_course_question(university, faculty, department, messages):
+    return {
+        "answer": f"{university}{faculty}についての回答です。",
+        "_token_usage": {"input_tokens": 10, "output_tokens": 20},
+    }
+
+
+def test_course_chat_returns_answer():
+    with patch("app.answer_course_question", side_effect=_fake_answer_course_question):
+        resp = client.post(
+            "/course-chat",
+            json={
+                "university": "同志社大学",
+                "faculty": "文学部",
+                "department": "",
+                "messages": [{"role": "user", "content": "民法の授業は何を勉強しますか?"}],
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"] == "同志社大学文学部についての回答です。"
+    assert "_token_usage" not in body
+
+
+def test_course_chat_requires_university_and_faculty():
+    resp = client.post(
+        "/course-chat",
+        json={
+            "university": "  ",
+            "faculty": "文学部",
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_course_chat_requires_messages():
+    resp = client.post(
+        "/course-chat",
+        json={"university": "同志社大学", "faculty": "文学部", "messages": []},
+    )
+    assert resp.status_code == 400
+
+
+def test_course_chat_blocked_with_402_when_quota_exceeded(monkeypatch):
+    import db
+
+    other_user_headers = {"X-Dev-User-Id": "course-chat-quota-test-user"}
+    monkeypatch.setattr(app_module, "PLAN_TOKEN_QUOTAS", {"free": 10, "pro": 200_000, "max": 1_000_000})
+    db.add_token_usage("course-chat-quota-test-user", 999)
+
+    resp = client.post(
+        "/course-chat",
+        json={
+            "university": "同志社大学",
+            "faculty": "文学部",
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+        headers=other_user_headers,
+    )
+    assert resp.status_code == 402
+
+
+def test_course_chat_increments_usage():
+    import db
+
+    headers = {"X-Dev-User-Id": "course-chat-usage-tracking-user"}
+    before = db.get_or_create_entitlement("course-chat-usage-tracking-user")["tokens_used"]
+
+    with patch("app.answer_course_question", side_effect=_fake_answer_course_question):
+        resp = client.post(
+            "/course-chat",
+            json={
+                "university": "同志社大学",
+                "faculty": "文学部",
+                "messages": [{"role": "user", "content": "質問です"}],
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+
+    after = db.get_or_create_entitlement("course-chat-usage-tracking-user")["tokens_used"]
+    assert after == before + 30
+
+
+def test_course_chat_rate_limit_returns_429_when_exceeded(monkeypatch):
+    monkeypatch.setattr(app_module, "COURSE_CHAT_RATE_LIMIT_PER_MINUTE", 1)
+
+    with patch("app.answer_course_question", side_effect=_fake_answer_course_question):
+        first = client.post(
+            "/course-chat",
+            json={
+                "university": "同志社大学",
+                "faculty": "文学部",
+                "messages": [{"role": "user", "content": "1回目"}],
+            },
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/course-chat",
+            json={
+                "university": "同志社大学",
+                "faculty": "文学部",
+                "messages": [{"role": "user", "content": "2回目"}],
+            },
+        )
+        assert second.status_code == 429
+
+
+def _fake_generate_paper_body(title, research_question, sections, target_length=""):
+    return {
+        "body": f"# {title}\n\n本文です。",
+        "_token_usage": {"input_tokens": 15, "output_tokens": 25},
+    }
+
+
+_SAMPLE_SECTIONS = [{"heading": "背景", "purpose": "背景を説明する", "literature": []}]
+
+
+def test_generate_body_returns_body():
+    with patch("app.generate_paper_body", side_effect=_fake_generate_paper_body):
+        resp = client.post(
+            "/generate/body",
+            json={
+                "title": "テストの論文",
+                "research_question": "問い",
+                "sections": _SAMPLE_SECTIONS,
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "本文です" in body["body"]
+    assert "_token_usage" not in body
+
+
+def test_generate_body_requires_title():
+    resp = client.post(
+        "/generate/body",
+        json={"title": "  ", "sections": _SAMPLE_SECTIONS},
+    )
+    assert resp.status_code == 400
+
+
+def test_generate_body_requires_sections():
+    resp = client.post(
+        "/generate/body",
+        json={"title": "テストの論文", "sections": []},
+    )
+    assert resp.status_code == 400
+
+
+def test_generate_body_blocked_with_402_when_quota_exceeded(monkeypatch):
+    import db
+
+    other_user_headers = {"X-Dev-User-Id": "generate-body-quota-test-user"}
+    monkeypatch.setattr(app_module, "PLAN_TOKEN_QUOTAS", {"free": 10, "pro": 200_000, "max": 1_000_000})
+    db.add_token_usage("generate-body-quota-test-user", 999)
+
+    resp = client.post(
+        "/generate/body",
+        json={"title": "テストの論文", "sections": _SAMPLE_SECTIONS},
+        headers=other_user_headers,
+    )
+    assert resp.status_code == 402
+
+
+def test_generate_body_increments_usage():
+    import db
+
+    headers = {"X-Dev-User-Id": "generate-body-usage-tracking-user"}
+    before = db.get_or_create_entitlement("generate-body-usage-tracking-user")["tokens_used"]
+
+    with patch("app.generate_paper_body", side_effect=_fake_generate_paper_body):
+        resp = client.post(
+            "/generate/body",
+            json={"title": "テストの論文", "sections": _SAMPLE_SECTIONS},
+            headers=headers,
+        )
+    assert resp.status_code == 200
+
+    after = db.get_or_create_entitlement("generate-body-usage-tracking-user")["tokens_used"]
+    assert after == before + 40
+
+
+def test_generate_body_shares_rate_limit_with_generate(monkeypatch):
+    monkeypatch.setattr(app_module, "GENERATE_RATE_LIMIT_PER_MINUTE", 1)
+
+    with patch("app.generate_paper_body", side_effect=_fake_generate_paper_body):
+        first = client.post(
+            "/generate/body",
+            json={"title": "テストの論文", "sections": _SAMPLE_SECTIONS},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/generate/body",
+            json={"title": "テストの論文", "sections": _SAMPLE_SECTIONS},
+        )
+        assert second.status_code == 429
+
+
+def _fake_generate_study_notes(document_text, focus=""):
+    return {
+        "content": f"## 全体の要約\n{document_text[:20]}についての要約です。",
+        "_token_usage": {"input_tokens": 15, "output_tokens": 25},
+    }
+
+
+def test_study_notes_returns_content_from_pasted_text():
+    with patch("app.generate_study_notes", side_effect=_fake_generate_study_notes):
+        resp = client.post("/study-notes", data={"text": "江戸時代の身分制度に関するレポート本文"})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "全体の要約" in body["content"]
+    assert "_token_usage" not in body
+
+
+def test_study_notes_requires_text_or_file():
+    resp = client.post("/study-notes", data={"text": "  "})
+    assert resp.status_code == 400
+
+
+def test_study_notes_reads_uploaded_text_file():
+    captured = {}
+
+    def _capture(document_text, focus=""):
+        captured["document_text"] = document_text
+        return _fake_generate_study_notes(document_text, focus)
+
+    with patch("app.generate_study_notes", side_effect=_capture):
+        resp = client.post(
+            "/study-notes",
+            data={"text": ""},
+            files={"file": ("report.txt", "資料ファイルの中身".encode("utf-8"), "text/plain")},
+        )
+
+    assert resp.status_code == 200
+    assert "資料ファイルの中身" in captured["document_text"]
+
+
+def test_study_notes_rejects_unsupported_file_type():
+    resp = client.post(
+        "/study-notes",
+        data={"text": ""},
+        files={"file": ("report.docx.bak", b"whatever", "application/octet-stream")},
+    )
+    assert resp.status_code == 400
+
+
+def test_study_notes_blocked_with_402_when_quota_exceeded(monkeypatch):
+    import db
+
+    headers = {"X-Dev-User-Id": "study-notes-quota-test-user"}
+    monkeypatch.setattr(app_module, "PLAN_TOKEN_QUOTAS", {"free": 10, "pro": 200_000, "max": 1_000_000})
+    db.add_token_usage("study-notes-quota-test-user", 999)
+
+    resp = client.post(
+        "/study-notes",
+        data={"text": "レポート本文"},
+        headers=headers,
+    )
+    assert resp.status_code == 402
+
+
+def test_study_notes_increments_usage():
+    import db
+
+    headers = {"X-Dev-User-Id": "study-notes-usage-tracking-user"}
+    before = db.get_or_create_entitlement("study-notes-usage-tracking-user")["tokens_used"]
+
+    with patch("app.generate_study_notes", side_effect=_fake_generate_study_notes):
+        resp = client.post(
+            "/study-notes",
+            data={"text": "レポート本文"},
+            headers=headers,
+        )
+    assert resp.status_code == 200
+
+    after = db.get_or_create_entitlement("study-notes-usage-tracking-user")["tokens_used"]
+    assert after == before + 40
+
+
+def test_study_notes_rate_limit_returns_429_when_exceeded(monkeypatch):
+    monkeypatch.setattr(app_module, "STUDY_NOTES_RATE_LIMIT_PER_MINUTE", 1)
+
+    with patch("app.generate_study_notes", side_effect=_fake_generate_study_notes):
+        first = client.post("/study-notes", data={"text": "1回目のレポート本文"})
+        assert first.status_code == 200
+
+        second = client.post("/study-notes", data={"text": "2回目のレポート本文"})
+        assert second.status_code == 429

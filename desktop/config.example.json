@@ -1,0 +1,5 @@
+{
+  "webUrl": "https://app.example.com",
+  "apiOrigin": "https://api.example.com",
+  "startLocalApi": false
+}

@@ -222,7 +222,12 @@ def test_create_and_decode_app_token_roundtrip():
 
 def test_decode_app_token_rejects_tampered_token():
     token = auth.create_app_token("user-42")
-    tampered = token[:-1] + ("A" if token[-1] != "A" else "B")
+    # 署名部分の末尾1文字はbase64urlのパディング境界上、稀に別の文字へ変えても
+    # デコード結果(バイト列)が変わらないことがあるため、中間の1文字を反転させる
+    # (先頭のheader.payload部分ではなく署名側であることを保証するため後ろから10文字目を使う)。
+    index = len(token) - 10
+    flipped = "A" if token[index] != "A" else "B"
+    tampered = token[:index] + flipped + token[index + 1:]
     with pytest.raises(auth.AuthError):
         auth.decode_app_token(tampered)
 

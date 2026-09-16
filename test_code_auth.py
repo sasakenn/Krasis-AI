@@ -9,20 +9,39 @@ from app import app
 client = TestClient(app)
 
 
-def test_signup_creates_account_and_returns_token_and_code():
+def _extract_code_from_message(message_body: str) -> str:
+    """メール本文から12桁(16進数)のログインコードを取り出す(テスト専用)。"""
+    return next(
+        line.strip()
+        for line in message_body.splitlines()
+        if len(line.strip()) == 12 and all(c in "0123456789abcdef" for c in line.strip())
+    )
+
+
+def _signup(email: str) -> tuple[dict, str]:
+    """テスト用: サインアップし、(レスポンスJSON, メールで送られたコード)を返す。"""
+    with patch("app.send_email") as mock_send_email:
+        resp = client.post("/auth/code/signup", json={"email": email})
+    assert resp.status_code == 200
+    _, _, message_body = mock_send_email.call_args.args
+    return resp.json(), _extract_code_from_message(message_body)
+
+
+def test_signup_creates_account_and_emails_a_login_code():
     with patch("app.send_email") as mock_send_email:
         resp = client.post("/auth/code/signup", json={"email": "new-user@example.com"})
 
     assert resp.status_code == 200
     body = resp.json()
     assert body["token"]
-    assert len(body["code"]) == 12
-    int(body["code"], 16)  # 16進数として解釈できる(=乱数コードの形式)
+    assert "code" not in body  # コードは画面にもAPIレスポンスにも出さず、メールでのみ届ける
 
     mock_send_email.assert_called_once()
     to, subject, message_body = mock_send_email.call_args.args
     assert to == "new-user@example.com"
-    assert body["code"] in message_body
+    code = _extract_code_from_message(message_body)
+    assert len(code) == 12
+    int(code, 16)  # 16進数として解釈できる(=乱数コードの形式)
 
     # 発行されたトークンでAPIが叩けること
     resp2 = client.get("/history", headers={"Authorization": f"Bearer {body['token']}", "X-Dev-User-Id": ""})
@@ -55,9 +74,7 @@ def test_signup_rejects_duplicate_email():
 
 
 def test_login_with_correct_code_succeeds():
-    with patch("app.send_email"):
-        signup = client.post("/auth/code/signup", json={"email": "login-test@example.com"})
-    code = signup.json()["code"]
+    _, code = _signup("login-test@example.com")
 
     resp = client.post("/auth/code/login", json={"email": "login-test@example.com", "code": code})
     assert resp.status_code == 200
@@ -65,8 +82,7 @@ def test_login_with_correct_code_succeeds():
 
 
 def test_login_with_wrong_code_fails():
-    with patch("app.send_email"):
-        client.post("/auth/code/signup", json={"email": "wrong-code-test@example.com"})
+    _signup("wrong-code-test@example.com")
 
     resp = client.post(
         "/auth/code/login", json={"email": "wrong-code-test@example.com", "code": "000000000000"}
@@ -80,16 +96,14 @@ def test_login_with_unknown_email_fails():
 
 
 def test_reissue_replaces_code_and_invalidates_old_one():
-    with patch("app.send_email"):
-        signup = client.post("/auth/code/signup", json={"email": "reissue-test@example.com"})
-    old_code = signup.json()["code"]
+    _, old_code = _signup("reissue-test@example.com")
 
     with patch("app.send_email") as mock_send_email:
         reissue = client.post("/auth/code/reissue", json={"email": "reissue-test@example.com"})
     assert reissue.status_code == 200
     mock_send_email.assert_called_once()
     _, _, message_body = mock_send_email.call_args.args
-    new_code = next(line for line in message_body.splitlines() if len(line) == 12 and all(c in "0123456789abcdef" for c in line))
+    new_code = _extract_code_from_message(message_body)
 
     # 古いコードはもう使えない
     old_login = client.post("/auth/code/login", json={"email": "reissue-test@example.com", "code": old_code})
@@ -121,12 +135,10 @@ def test_code_auth_endpoints_are_rate_limited(monkeypatch):
         assert second.status_code == 429
 
 
-def test_reused_hash_is_timing_safe_compared(monkeypatch):
+def test_reused_hash_is_timing_safe_compared():
     # hmac.compare_digestが実際に使われていることを確認する(単純な==比較への退行防止)。
     with patch("app.hmac.compare_digest", wraps=__import__("hmac").compare_digest) as mock_compare:
-        with patch("app.send_email"):
-            signup = client.post("/auth/code/signup", json={"email": "timing-safe-test@example.com"})
-        code = signup.json()["code"]
+        _, code = _signup("timing-safe-test@example.com")
         client.post("/auth/code/login", json={"email": "timing-safe-test@example.com", "code": code})
 
     assert mock_compare.called
