@@ -1,7 +1,7 @@
 # フロントエンドをビルドしてから、バックエンド(FastAPI)単体で
 # API・画面の両方を同一オリジンから配信する(README「本番ビルドを単一プロセスで配信する場合」を参照)。
 
-FROM node:20-slim AS frontend-build
+FROM node:24-slim AS frontend-build
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
