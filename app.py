@@ -41,12 +41,16 @@ from db import (
     create_session,
     create_task,
     delete_generation,
+    delete_history_entry,
     delete_mfa,
     delete_session,
     delete_task,
     enable_mfa,
+    get_activity_summary,
+    get_admin_overview,
     get_code_login_by_email,
     get_generation,
+    get_history_entry,
     get_mfa_enrollment,
     get_or_create_entitlement,
     get_user_email,
@@ -55,18 +59,23 @@ from db import (
     is_mfa_enabled,
     list_due_reminders,
     list_generations,
+    list_history_entries,
     list_security_events,
     list_sessions,
     list_tasks,
     mark_task_reminded,
+    record_activity_ping,
     record_security_event,
     save_generation,
+    save_history_entry,
     set_generation_privacy,
+    set_history_entry_privacy,
     set_mfa_secret,
     set_plan,
     set_stripe_customer,
     set_task_status,
     update_code_login_hash,
+    update_history_entry,
     update_session,
     upsert_user,
 )
@@ -74,6 +83,7 @@ from mfa import generate_secret as generate_mfa_secret
 from mfa import provisioning_uri as mfa_provisioning_uri
 from mfa import verify_code as verify_mfa_code
 from course_guide import answer_course_question
+from exclamation import brush_off_if_exclamation
 from mailer import send_email
 from outline import generate_outline
 from paper_writer import generate_paper_body
@@ -81,6 +91,7 @@ from search import search_literature_diverse
 from study_notes import generate_study_notes
 from task_estimator import estimate_task_duration
 from task_generator import build_xlsx_bytes, generate_task_spreadsheet, generate_task_text
+from translate import LANGUAGE_NAMES, translate_titles
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +181,13 @@ LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
 # 本番環境では絶対に設定しないこと(誰でも他人になりすませてしまう)。
 DEV_BYPASS_USER_ID = os.getenv("DEV_BYPASS_USER_ID", "").strip()
 
+# 運営者向け管理ダッシュボード(/admin/overview)へのアクセスを許可するアカウント。
+# カンマ区切りで複数指定可能。どちらも未設定なら誰も/admin/overviewにアクセスできない。
+# ADMIN_EMAILS: users.emailと突き合わせる(Apple/Google/GitHub/メールログインの全方式で使える)。
+# ADMIN_USER_IDS: user_idと直接突き合わせる(DEV_BYPASS_USER_IDでのローカル確認用)。
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+ADMIN_USER_IDS = {u.strip() for u in os.getenv("ADMIN_USER_IDS", "").split(",") if u.strip()}
+
 # /generate 1件あたりClaude APIを呼ぶため、誤操作や不具合でのコスト暴走を防ぐための
 # 簡易レート制限(ユーザーごとの1分あたりの上限リクエスト数)。0以下で無効化。
 GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE", "20"))
@@ -203,11 +221,19 @@ TASK_GENERATOR_RATE_LIMIT_PER_MINUTE = int(os.getenv("TASK_GENERATOR_RATE_LIMIT_
 # コスト暴走を防ぐ。0以下で無効化。
 STUDY_NOTES_RATE_LIMIT_PER_MINUTE = int(os.getenv("STUDY_NOTES_RATE_LIMIT_PER_MINUTE", "20"))
 
+# /literature/translate 1件あたりClaude APIを呼ぶため、同様にユーザーごとの
+# 1分あたりの上限リクエスト数でコスト暴走を防ぐ。0以下で無効化。
+TRANSLATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("TRANSLATE_RATE_LIMIT_PER_MINUTE", "20"))
+
+# /activity/ping はClaude APIを呼ばないが、フロントは60秒に1回叩くだけなので、
+# 想定外の連打だけを弾ける程度の緩い上限にしておく。0以下で無効化。
+ACTIVITY_PING_RATE_LIMIT_PER_MINUTE = int(os.getenv("ACTIVITY_PING_RATE_LIMIT_PER_MINUTE", "6"))
+
 # タスクのリマインド時刻を何秒おきにチェックしてメール送信するか。
 TASK_REMINDER_POLL_SECONDS = int(os.getenv("TASK_REMINDER_POLL_SECONDS", "60"))
 
-# 月額プランごとのトークン枠(仮の数値)。
-PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 20_000, "pro": 200_000, "max": 1_000_000}
+# 月額プランごとのトークン枠(仮の数値)。従来値の25%(75%減)で運用。
+PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 50_000, "pro": 300_000, "max": 1_500_000}
 
 # --- Stripe(サブスク課金) ---
 # 空のままなら/billing/*は503を返すだけで、それ以外の機能には一切影響しない。
@@ -292,6 +318,21 @@ def get_current_user(
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+def _is_admin(user_id: str) -> bool:
+    if not ADMIN_EMAILS and not ADMIN_USER_IDS:
+        return False
+    if user_id in ADMIN_USER_IDS:
+        return True
+    email = get_user_email(user_id)
+    return bool(email and email.strip().lower() in ADMIN_EMAILS)
+
+
+def require_admin(user_id: str = Depends(get_current_user)) -> str:
+    if not _is_admin(user_id):
+        raise HTTPException(status_code=403, detail="管理者権限が必要です")
+    return user_id
+
+
 def _enforce_rate_limit(bucket: str, key: str, limit: int, message: str) -> None:
     if limit <= 0:
         return
@@ -333,6 +374,24 @@ def _enforce_course_chat_rate_limit(key: str) -> None:
         key,
         COURSE_CHAT_RATE_LIMIT_PER_MINUTE,
         "course-chatのレート制限を超えました。しばらく待って再試行してください。",
+    )
+
+
+def _enforce_translate_rate_limit(key: str) -> None:
+    _enforce_rate_limit(
+        "literature-translate",
+        key,
+        TRANSLATE_RATE_LIMIT_PER_MINUTE,
+        "翻訳のレート制限を超えました。しばらく待って再試行してください。",
+    )
+
+
+def _enforce_activity_ping_rate_limit(key: str) -> None:
+    _enforce_rate_limit(
+        "activity-ping",
+        key,
+        ACTIVITY_PING_RATE_LIMIT_PER_MINUTE,
+        "activity pingのレート制限を超えました。",
     )
 
 
@@ -424,6 +483,7 @@ class CourseChatRequest(BaseModel):
     faculty: str
     department: str = ""
     messages: List[CourseChatMessage]
+    history_id: Optional[int] = None
 
 
 class PaperBodyRequest(BaseModel):
@@ -431,6 +491,11 @@ class PaperBodyRequest(BaseModel):
     research_question: str = ""
     sections: List[Dict[str, Any]]
     target_length: str = ""
+
+
+class TranslateTitlesRequest(BaseModel):
+    titles: List[str]
+    target_lang: str
 
 
 class TaskCreateRequest(BaseModel):
@@ -756,9 +821,24 @@ async def generate(
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
 
+    entitlement = get_or_create_entitlement(user_id)
+    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
+    if entitlement["tokens_used"] >= quota:
+        raise HTTPException(
+            status_code=402,
+            detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
+        )
+
     # 初回プロンプト(まだ分量が指定されていないリクエスト)には、
-    # 生成前にアウトラインではなく分量選択の質問を返す。
+    # 生成前にアウトラインではなく分量選択の質問を返す。ただし「いいね」のような
+    # 実質的な依頼を含まない感嘆文だけの場合は、質問を挟まず短く受け流す。
     if not target_length:
+        brush_off = brush_off_if_exclamation(topic)
+        usage = brush_off.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+        add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+        if brush_off["reply"]:
+            return {"type": "brush_off", "message": brush_off["reply"]}
+
         return {
             "type": "length_question",
             "message": "生成する分量の目安を選んでください。",
@@ -767,14 +847,6 @@ async def generate(
 
     if target_length not in LENGTH_OPTION_KEYS:
         raise HTTPException(status_code=400, detail="invalid target_length")
-
-    entitlement = get_or_create_entitlement(user_id)
-    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
-    if entitlement["tokens_used"] >= quota:
-        raise HTTPException(
-            status_code=402,
-            detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
-        )
 
     reference_notes = ""
     if reference_files:
@@ -848,12 +920,65 @@ def course_chat(payload: CourseChatRequest, user_id: str = Depends(get_current_u
             detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
         )
 
+    # 直近の発言が「いいね」のような、実質的な依頼を含まない感嘆文・相槌だけの場合は、
+    # 授業内容の回答フロー(検索・履歴保存を含む)に入らず短く受け流す。
+    last_message = payload.messages[-1]
+    if last_message.role == "user":
+        brush_off = brush_off_if_exclamation(last_message.content)
+        brush_off_usage = brush_off.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+        add_token_usage(user_id, brush_off_usage["input_tokens"] + brush_off_usage["output_tokens"])
+        if brush_off["reply"]:
+            return {"answer": brush_off["reply"]}
+
     result = answer_course_question(
         payload.university.strip(),
         payload.faculty.strip(),
         payload.department,
         [m.model_dump() for m in payload.messages],
     )
+
+    usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+    add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+
+    university = payload.university.strip()
+    faculty = payload.faculty.strip()
+    title = f"{university} / {faculty}"
+    history_payload = {
+        "university": university,
+        "faculty": faculty,
+        "department": payload.department,
+        "messages": [m.model_dump() for m in payload.messages] + [{"role": "assistant", "content": result["answer"]}],
+    }
+    if payload.history_id and update_history_entry(user_id, payload.history_id, "logic-guide", title, history_payload):
+        result["history_id"] = payload.history_id
+    else:
+        entry = save_history_entry(user_id, "logic-guide", title, history_payload)
+        result["history_id"] = entry["id"]
+
+    return result
+
+
+@app.post("/literature/translate")
+def translate_literature_titles(payload: TranslateTitlesRequest, user_id: str = Depends(get_current_user)):
+    """関連文献パネルの言語セレクタから呼ばれ、文献タイトルの一覧をまとめて翻訳する。
+    Claude APIを呼ぶため、/course-chatと同様にレート制限・トークンクォータを適用する。
+    """
+    _enforce_translate_rate_limit(user_id)
+
+    if not payload.titles:
+        raise HTTPException(status_code=400, detail="titles is required")
+    if payload.target_lang not in LANGUAGE_NAMES:
+        raise HTTPException(status_code=400, detail="invalid target_lang")
+
+    entitlement = get_or_create_entitlement(user_id)
+    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
+    if entitlement["tokens_used"] >= quota:
+        raise HTTPException(
+            status_code=402,
+            detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
+        )
+
+    result = translate_titles(payload.titles, payload.target_lang)
 
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
@@ -904,7 +1029,7 @@ def tasks_create(payload: TaskCreateRequest, user_id: str = Depends(get_current_
     else:
         remind_at = now + timedelta(minutes=estimated_minutes)
 
-    return create_task(
+    created = create_task(
         user_id,
         description,
         payload.deadline,
@@ -912,6 +1037,21 @@ def tasks_create(payload: TaskCreateRequest, user_id: str = Depends(get_current_
         remind_at.isoformat(),
         result.get("reasoning", ""),
     )
+
+    save_history_entry(
+        user_id,
+        "tasks",
+        description[:60],
+        {
+            "description": description,
+            "deadline": payload.deadline,
+            "estimated_minutes": estimated_minutes,
+            "remind_at": remind_at.isoformat(),
+            "reasoning": result.get("reasoning", ""),
+        },
+    )
+
+    return created
 
 
 @app.get("/tasks")
@@ -971,6 +1111,13 @@ def task_generator(payload: TaskGeneratorRequest, user_id: str = Depends(get_cur
         xlsx_bytes = build_xlsx_bytes(spec)
         filename = f"{(spec.get('filename') or '課題').strip()}.xlsx"
 
+        save_history_entry(
+            user_id,
+            "task-generator",
+            description[:60],
+            {"kind": "excel", "description": description, "spec": spec, "filename": filename},
+        )
+
         return Response(
             content=xlsx_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -980,6 +1127,13 @@ def task_generator(payload: TaskGeneratorRequest, user_id: str = Depends(get_cur
     result = generate_task_text(description)
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+
+    save_history_entry(
+        user_id,
+        "task-generator",
+        description[:60],
+        {"kind": "text", "description": description, "content": result["content"]},
+    )
 
     return {"kind": "text", "content": result["content"]}
 
@@ -1016,6 +1170,9 @@ async def study_notes(
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
 
+    label = file.filename if file and file.filename else document_text[:40]
+    save_history_entry(user_id, "study-notes", label[:60], {"label": label, "content": result["content"]})
+
     return {"content": result["content"]}
 
 
@@ -1048,6 +1205,64 @@ def history_delete(generation_id: int, user_id: str = Depends(get_current_user))
 def history_set_private(generation_id: int, payload: PrivacyUpdate, user_id: str = Depends(get_current_user)):
     if not set_generation_privacy(user_id, generation_id, payload.is_private):
         raise HTTPException(status_code=404, detail="generation not found")
+    return {"status": "ok"}
+
+
+# outline以外の4モード(logic-guide/task-generator/study-notes/tasks)共通の履歴。
+# outlineだけスレッド(セッション)を再構築する専用UIを持つので/historyのまま独立させ、
+# こちらはどのタブを選んでも同じ場所・同じ形で閲覧できる読み取り専用の履歴として使う。
+MODE_HISTORY_MODES = {"logic-guide", "task-generator", "study-notes", "tasks"}
+
+
+@app.get("/mode-history")
+def mode_history(
+    mode: str,
+    limit: int = 50,
+    q: Optional[str] = None,
+    scope: Optional[str] = None,
+    user_id: str = Depends(get_current_user),
+):
+    if mode not in MODE_HISTORY_MODES:
+        raise HTTPException(status_code=400, detail="invalid mode")
+    return {"items": list_history_entries(user_id, mode, limit=limit, q=q, only_private=(scope == "private"))}
+
+
+@app.get("/mode-history/{entry_id}")
+def mode_history_detail(entry_id: int, user_id: str = Depends(get_current_user)):
+    record = get_history_entry(user_id, entry_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="history entry not found")
+    return record
+
+
+@app.get("/mode-history/{entry_id}/download")
+def mode_history_download(entry_id: int, user_id: str = Depends(get_current_user)):
+    """task-generatorのExcel履歴を、保存しておいたspecから再生成してダウンロードさせる。"""
+    record = get_history_entry(user_id, entry_id)
+    if record is None or record["mode"] != "task-generator" or record["payload"].get("kind") != "excel":
+        raise HTTPException(status_code=404, detail="downloadable file not found")
+
+    spec = record["payload"]["spec"]
+    filename = record["payload"].get("filename") or "課題.xlsx"
+    xlsx_bytes = build_xlsx_bytes(spec)
+    return Response(
+        content=xlsx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": _content_disposition(filename)},
+    )
+
+
+@app.delete("/mode-history/{entry_id}")
+def mode_history_delete(entry_id: int, user_id: str = Depends(get_current_user)):
+    if not delete_history_entry(user_id, entry_id):
+        raise HTTPException(status_code=404, detail="history entry not found")
+    return {"status": "deleted"}
+
+
+@app.put("/mode-history/{entry_id}/private")
+def mode_history_set_private(entry_id: int, payload: PrivacyUpdate, user_id: str = Depends(get_current_user)):
+    if not set_history_entry_privacy(user_id, entry_id, payload.is_private):
+        raise HTTPException(status_code=404, detail="history entry not found")
     return {"status": "ok"}
 
 
@@ -1121,7 +1336,35 @@ def auth_security_events(user_id: str = Depends(get_current_user)):
 def me(user_id: str = Depends(get_current_user)):
     entitlement = get_or_create_entitlement(user_id)
     quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
-    return {**entitlement, "tokens_quota": quota}
+    return {**entitlement, "tokens_quota": quota, "is_admin": _is_admin(user_id)}
+
+
+@app.get("/admin/overview")
+def admin_overview(_admin_user_id: str = Depends(require_admin)):
+    """運営者向け管理ダッシュボード用の集計値(ユーザー数・プラン内訳・利用量・生成件数など)。
+
+    ADMIN_EMAILS/ADMIN_USER_IDSのいずれにも該当しないユーザーは403になる。
+    """
+    return get_admin_overview()
+
+
+@app.post("/activity/ping")
+def activity_ping(user_id: str = Depends(get_current_user)):
+    """ホーム画面の利用時間グラフ向けに、画面を開いている間の生存確認を1件記録する。
+
+    フロントは60秒おきにこれを呼ぶだけで、Claude APIは呼ばないためトークン消費はない。
+    """
+    _enforce_activity_ping_rate_limit(user_id)
+    record_activity_ping(user_id)
+    return {"status": "ok"}
+
+
+@app.get("/activity/summary")
+def activity_summary(granularity: str = "day", user_id: str = Depends(get_current_user)):
+    """ホーム画面のグラフ向けに、日('day')/週('week')/年('year')単位の利用時間(分)を返す。"""
+    if granularity not in ("day", "week", "year"):
+        raise HTTPException(status_code=400, detail="granularity must be one of: day, week, year")
+    return {"granularity": granularity, "items": get_activity_summary(user_id, granularity)}
 
 
 @app.post("/billing/checkout")
@@ -1253,5 +1496,9 @@ if __name__ == '__main__':
     import uvicorn
 
     desktop_mode = os.getenv("DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
+    # デスクトップ版はローカルのElectronだけから叩ければよいので127.0.0.1に留める。
+    # クラウド(Render等)のコンテナはホスト側から到達できるよう0.0.0.0で待ち受ける必要がある。
+    host = "127.0.0.1" if desktop_mode else os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("app:app", host="127.0.0.1", port=port, reload=not desktop_mode)
+    is_render = bool(os.getenv("RENDER"))
+    uvicorn.run("app:app", host=host, port=port, reload=not desktop_mode and not is_render)

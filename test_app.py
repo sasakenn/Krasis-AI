@@ -530,6 +530,35 @@ def test_me_returns_plan_and_quota():
     assert "tokens_used" in body
 
 
+def test_me_reports_is_admin_flag():
+    admin_resp = client.get("/me")
+    assert admin_resp.json()["is_admin"] is True
+
+    non_admin_resp = client.get("/me", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert non_admin_resp.json()["is_admin"] is False
+
+
+def test_admin_overview_rejects_non_admin_user():
+    resp = client.get("/admin/overview", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert resp.status_code == 403
+
+
+def test_admin_overview_rejects_unauthenticated_request():
+    resp = client.get("/admin/overview", headers={"X-Dev-User-Id": ""})
+    assert resp.status_code == 401
+
+
+def test_admin_overview_returns_aggregate_stats_for_admin_user():
+    resp = client.get("/admin/overview")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["users"]["total"] >= 1
+    assert set(body["plans"].keys()) == {"free", "pro", "max", "paying"}
+    assert "tokens_used_this_period" in body["usage"]
+    assert set(body["generations"].keys()) == {"total", "last_7d", "last_30d"}
+    assert isinstance(body["recent_security_events"], list)
+
+
 def test_generate_blocked_with_402_when_quota_exceeded(monkeypatch):
     import db
 

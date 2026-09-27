@@ -1,11 +1,66 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  BookOpenText,
+  Download,
+  FileSpreadsheet,
+  House,
+  LockKeyhole,
+  LockKeyholeOpen,
+  LayoutDashboard,
+  Menu,
+  PencilLine,
+  Plus,
+  RefreshCw,
+  Settings2,
+  ShieldCheck,
+  Trash2,
+  X,
+} from 'lucide-react'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
+// アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
+// 図だけ浮いて見える。'base'テーマ+themeVariablesで、アプリの配色に合わせたパステル調に統一する。
 let mermaidPromise = null
 function loadMermaid() {
   if (!mermaidPromise) {
     mermaidPromise = import('mermaid').then(({ default: mermaid }) => {
-      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' })
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'base',
+        securityLevel: 'strict',
+        themeVariables: {
+          fontFamily: "'Noto Sans JP', system-ui, sans-serif",
+          background: '#ffffff',
+          textColor: '#14161A',
+          lineColor: '#B0AA9B',
+
+          primaryColor: '#DCE6FB',
+          primaryTextColor: '#14161A',
+          primaryBorderColor: '#7C93D8',
+
+          secondaryColor: '#FBE3E3',
+          secondaryTextColor: '#14161A',
+          secondaryBorderColor: '#D89A9A',
+
+          tertiaryColor: '#DFF3EC',
+          tertiaryTextColor: '#14161A',
+          tertiaryBorderColor: '#8FC7B4',
+
+          // mindmapなど、枝ごとに色を巡回させる図で使われるパレット。
+          cScale0: '#DCE6FB', cScaleLabel0: '#14161A',
+          cScale1: '#FBE3E3', cScaleLabel1: '#14161A',
+          cScale2: '#DFF3EC', cScaleLabel2: '#14161A',
+          cScale3: '#FDEFD9', cScaleLabel3: '#14161A',
+          cScale4: '#EBE1FA', cScaleLabel4: '#14161A',
+          cScale5: '#D9F1F5', cScaleLabel5: '#14161A',
+          cScale6: '#FBE8D5', cScaleLabel6: '#14161A',
+          cScale7: '#E6EFD9', cScaleLabel7: '#14161A',
+          cScale8: '#FAE1EE', cScaleLabel8: '#14161A',
+          cScale9: '#DEE7F7', cScaleLabel9: '#14161A',
+          cScale10: '#F3E6D8', cScaleLabel10: '#14161A',
+          cScale11: '#E1F0E6', cScaleLabel11: '#14161A',
+        },
+      })
       return mermaid
     })
   }
@@ -18,6 +73,14 @@ const NEW_TAB_TITLE = '新規タブ'
 const ACTIVE_SESSION_STORAGE_KEY = 'paper-assistant-active-session-id'
 const TOKEN_STORAGE_KEY = 'paper-assistant-token'
 const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN || '').replace(/\/$/, '')
+
+function BrandMark({ className = '' }) {
+  return <BookOpenText className={`brand-mark ${className}`} aria-hidden="true" strokeWidth={1.8} />
+}
+
+function BrandLockup({ className = '' }) {
+  return <span className={`brand-lockup ${className}`}><BrandMark /> <span>THYNORA</span></span>
+}
 
 // 授業案内チャンネル: 主要大学の学部一覧(候補になければ「その他」から自由入力できる)。
 const OTHER_UNIVERSITY = 'その他(入力する)'
@@ -174,10 +237,10 @@ function OutlineResult({ outline, onUpdateOutline, idPrefix = 'section' }) {
       <div className="result-header">
         <h2>
           {outline.title}
-          {outline.is_private && <span className="private-badge" title="シークレット保存">🔒</span>}
+          {outline.is_private && <LockKeyhole className="private-badge" aria-label="シークレット保存" />}
         </h2>
         <button type="button" className="export-button" onClick={() => downloadMarkdown(outline)}>
-          📄 Markdownでダウンロード
+          <Download aria-hidden="true" /> Markdownでダウンロード
         </button>
       </div>
       <p className="research-question">{outline.research_question}</p>
@@ -215,17 +278,32 @@ function OutlineResult({ outline, onUpdateOutline, idPrefix = 'section' }) {
               <PaperBodyContent content={outline.body} />
             </div>
             <button type="button" className="export-button" onClick={handleGenerateBody} disabled={bodyLoading}>
-              {bodyLoading ? '再生成中…' : '🔁 本文を再生成'}
+              {bodyLoading ? '再生成中…' : <><RefreshCw aria-hidden="true" /> 本文を再生成</>}
             </button>
           </>
         ) : (
           <button type="button" className="generate-body-button" onClick={handleGenerateBody} disabled={bodyLoading}>
-            {bodyLoading ? '本文を生成中…' : '📝 論文本文を生成'}
+            {bodyLoading ? '本文を生成中…' : <><PencilLine aria-hidden="true" /> 論文本文を生成</>}
           </button>
         )}
         {bodyError && <div className="error">Error: {bodyError}</div>}
       </div>
     </div>
+  )
+}
+
+// 「Loading」の文字の後に、色は現在のtext-color(currentColor)を継承する
+// 3つの点を時間差でパルスさせる、汎用のローディング表示。
+function LoadingDots({ label = 'Loading' }) {
+  return (
+    <span className="loading-dots">
+      {label}
+      <span className="loading-dots-anim" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </span>
   )
 }
 
@@ -445,7 +523,7 @@ function LoginScreen({ onToken }) {
     return (
       <div className="app-root login-screen">
         <div className="login-card">
-          <div className="sidebar-brand">📚 Novera</div>
+          <BrandLockup className="sidebar-brand" />
           <p className="login-subtitle">認証アプリに表示されている6桁のコードを入力してください</p>
 
           <form className="code-auth-form" onSubmit={handleMfaVerify}>
@@ -479,7 +557,7 @@ function LoginScreen({ onToken }) {
   return (
     <div className="app-root login-screen">
       <div className="login-card">
-        <div className="sidebar-brand">📚 Novera</div>
+        <BrandLockup className="sidebar-brand" />
         <p className="login-subtitle">続けるにはログインしてください</p>
 
         <div className="login-options">
@@ -597,7 +675,7 @@ function LoginScreen({ onToken }) {
 
           {import.meta.env.DEV && (
             <button type="button" className="login-button login-button-dev" onClick={handleDevLogin} disabled={devLoading}>
-              {devLoading ? '処理中…' : '🛠 開発用ログイン'}
+              {devLoading ? '処理中…' : <><Settings2 aria-hidden="true" /> 開発用ログイン</>}
             </button>
           )}
         </div>
@@ -719,7 +797,10 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
     try {
       const data = await submitGenerate({ ...requestSnapshot, targetLength: null })
 
-      if (data.type === 'length_question') {
+      if (data.type === 'brush_off') {
+        onMessages((prev) => [...prev, { role: 'assistant', brushOff: data.message }])
+        resetComposer()
+      } else if (data.type === 'length_question') {
         setPendingRequest(requestSnapshot)
         setAwaitingLength(true)
         onMessages((prev) => [...prev, { role: 'assistant', lengthQuestion: data }])
@@ -780,9 +861,9 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                   {(m.referenceFileNames.length > 0 || m.formatFileName) && (
                     <div className="message-attachments">
                       {m.referenceFileNames.map((name, j) => (
-                        <span className="chip" key={`r-${j}`}>📎 {name}</span>
+                        <span className="chip" key={`r-${j}`}>⊕ {name}</span>
                       ))}
-                      {m.formatFileName && <span className="chip">📐 {m.formatFileName}</span>}
+                      {m.formatFileName && <span className="chip">▦ {m.formatFileName}</span>}
                     </div>
                   )}
                 </div>
@@ -792,6 +873,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 <div className="message-author">Assistant</div>
                 <div className="message-body">
                   {m.error && <div className="error">Error: {m.error}</div>}
+                  {m.brushOff && <p className="brush-off">{m.brushOff}</p>}
                   {m.lengthQuestion && (
                     <LengthQuestion
                       question={m.lengthQuestion}
@@ -818,7 +900,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
         {loading && (
           <div className="message message-assistant">
             <div className="message-author">Assistant</div>
-            <div className="message-body"><span className="typing">生成中…</span></div>
+            <div className="message-body"><span className="typing"><LoadingDots /></span></div>
           </div>
         )}
       </div>
@@ -850,7 +932,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 accept=".txt,.md,.markdown,.csv,.pdf,.docx"
                 onChange={(e) => { addReferenceFiles(e.target.files); e.target.value = '' }}
               />
-              <span className="attach-icon">📎</span>
+              <span className="attach-icon">⊕</span>
               <span className="attach-label">参考資料を追加</span>
               <small>txt/md/pdf/docxは中身を読み込みます(複数可、それ以外はファイル名のみ)</small>
             </div>
@@ -863,7 +945,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 accept=".txt,.md,.markdown,.csv,.pdf,.docx"
                 onChange={(e) => { setFormatFileFromList(e.target.files); e.target.value = '' }}
               />
-              <span className="attach-icon">📐</span>
+              <span className="attach-icon">▦</span>
               <span className="attach-label">フォーマット指定ファイルを追加</span>
               <small>生成する論文の形式を指定するファイル(1件、txt/md/pdf/docx対応)</small>
             </div>
@@ -874,7 +956,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
           <div className="composer-chips">
             {referenceFiles.map((f, i) => (
               <span className="chip" key={`rf-${i}`}>
-                📎 {f.name}
+                ⊕ {f.name}
                 <button
                   type="button"
                   className="chip-remove"
@@ -887,7 +969,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
             ))}
             {formatFile && (
               <span className="chip">
-                📐 {formatFile.name}
+                ▦ {formatFile.name}
                 <button
                   type="button"
                   className="chip-remove"
@@ -931,10 +1013,10 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
               onChange={(e) => setIsPrivate(e.target.checked)}
               disabled={awaitingLength}
             />
-            🔒 シークレットとして保存
+            <LockKeyhole aria-hidden="true" /> シークレットとして保存
           </label>
           <button type="submit" className="send-button" disabled={loading || !topic.trim() || awaitingLength}>
-            {loading ? '生成中…' : '送信 ➤'}
+            {loading ? <LoadingDots /> : '送信 →'}
           </button>
         </div>
 
@@ -1036,7 +1118,7 @@ function PaperBodyContent({ content }) {
   )
 }
 
-function CourseGuide() {
+function CourseGuide({ onGenerated }) {
   const [university, setUniversity] = useState('')
   const [customUniversity, setCustomUniversity] = useState('')
   const [faculty, setFaculty] = useState('')
@@ -1047,6 +1129,8 @@ function CourseGuide() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const bottomRef = useRef(null)
+  // 会話が続く限り同じ履歴項目を上書き更新するための、サーバー側の履歴ID
+  const historyIdRef = useRef(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1070,6 +1154,7 @@ function CourseGuide() {
   function handleReset() {
     setMessages([])
     setError(null)
+    historyIdRef.current = null
   }
 
   async function handleSend(e) {
@@ -1092,11 +1177,14 @@ function CourseGuide() {
           faculty: effectiveFaculty,
           department: department.trim(),
           messages: nextMessages,
+          history_id: historyIdRef.current,
         }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       const data = await resp.json()
+      if (data.history_id) historyIdRef.current = data.history_id
       setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+      onGenerated?.()
     } catch (err) {
       setError(String(err))
       setMessages((prev) => [...prev, { role: 'assistant', error: String(err) }])
@@ -1208,7 +1296,7 @@ function CourseGuide() {
         {loading && (
           <div className="message message-assistant">
             <div className="message-author">Assistant</div>
-            <div className="message-body"><span className="typing">考え中…</span></div>
+            <div className="message-body"><span className="typing"><LoadingDots label="考え中" /></span></div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -1225,7 +1313,7 @@ function CourseGuide() {
         />
         <div className="composer-toolbar">
           <button type="submit" className="send-button" disabled={!canChat || loading || !input.trim()}>
-            {loading ? '送信中…' : '送信 ➤'}
+            {loading ? '送信中…' : '送信 →'}
           </button>
         </div>
         {error && <div className="error">Error: {error}</div>}
@@ -1253,7 +1341,7 @@ function formatDateTime(iso) {
   })
 }
 
-function TaskReminders() {
+function TaskReminders({ onGenerated }) {
   const [tasks, setTasks] = useState([])
   const [description, setDescription] = useState('')
   const [deadline, setDeadline] = useState('')
@@ -1299,6 +1387,7 @@ function TaskReminders() {
       setTasks((prev) => [...prev, created].sort((a, b) => a.remind_at.localeCompare(b.remind_at)))
       setDescription('')
       setDeadline('')
+      onGenerated?.()
     } catch (err) {
       setError(String(err))
     } finally {
@@ -1370,8 +1459,8 @@ function TaskReminders() {
               <button type="button" onClick={() => handleToggleStatus(task)}>
                 {task.status === 'done' ? '未完了に戻す' : '完了にする'}
               </button>
-              <button type="button" className="task-item-delete" onClick={() => handleDelete(task)}>
-                🗑
+              <button type="button" className="task-item-delete" aria-label="🗑" onClick={() => handleDelete(task)}>
+                <Trash2 aria-hidden="true" />
               </button>
             </div>
           </li>
@@ -1398,7 +1487,7 @@ function downloadTaskExcel(item) {
   link.click()
 }
 
-function TaskGenerator() {
+function TaskGenerator({ onGenerated }) {
   const [description, setDescription] = useState('')
   const [kind, setKind] = useState('text')
   const [loading, setLoading] = useState(false)
@@ -1431,6 +1520,7 @@ function TaskGenerator() {
         const data = await resp.json()
         setItems((prev) => [{ id: Date.now(), description: text, kind, content: data.content }, ...prev])
       }
+      onGenerated?.()
       setDescription('')
     } catch (err) {
       setError(String(err))
@@ -1479,7 +1569,7 @@ function TaskGenerator() {
             </div>
             {item.kind === 'excel' ? (
               <button type="button" className="export-button" onClick={() => downloadTaskExcel(item)}>
-                📊 {item.filename} をダウンロード
+                <FileSpreadsheet aria-hidden="true" /> {item.filename} をダウンロード
               </button>
             ) : (
               <>
@@ -1487,7 +1577,7 @@ function TaskGenerator() {
                   <PaperBodyContent content={item.content} />
                 </div>
                 <button type="button" className="export-button" onClick={() => downloadTaskText(item)}>
-                  📄 Markdownでダウンロード
+                  <Download aria-hidden="true" /> Markdownでダウンロード
                 </button>
               </>
             )}
@@ -1498,7 +1588,7 @@ function TaskGenerator() {
   )
 }
 
-function StudyNotes() {
+function StudyNotes({ onGenerated }) {
   const [text, setText] = useState('')
   const [file, setFile] = useState(null)
   const [focus, setFocus] = useState('')
@@ -1531,6 +1621,7 @@ function StudyNotes() {
         { id: Date.now(), label: file ? file.name : text.slice(0, 40), content: data.content },
         ...prev,
       ])
+      onGenerated?.()
       setText('')
       setFile(null)
       setFocus('')
@@ -1555,7 +1646,7 @@ function StudyNotes() {
         />
         <div className="task-form-row">
           <label className="study-notes-file-input">
-            📎 ファイルを添付
+            ⊕ ファイルを添付
             <input
               ref={fileInputRef}
               type="file"
@@ -1567,7 +1658,7 @@ function StudyNotes() {
           </label>
           {file && (
             <span className="chip">
-              📎 {file.name}
+              ⊕ {file.name}
               <button
                 type="button"
                 className="chip-remove"
@@ -1653,6 +1744,224 @@ const MODE_DEFS = [
   },
 ]
 
+function formatActivityMinutes(minutes) {
+  if (minutes < 60) return `${Math.round(minutes)}分`
+  const hours = Math.floor(minutes / 60)
+  const mins = Math.round(minutes % 60)
+  return mins > 0 ? `${hours}時間${mins}分` : `${hours}時間`
+}
+
+function formatActivityBucketLabel(bucket, granularity) {
+  if (granularity === 'year') {
+    const [, month] = bucket.split('-')
+    return `${Number(month)}月`
+  }
+  const date = new Date(`${bucket}T00:00:00`)
+  return date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })
+}
+
+const ACTIVITY_RANGE_OPTIONS = [
+  { id: 'day', label: '日' },
+  { id: 'week', label: '週' },
+  { id: 'year', label: '年' },
+]
+
+// アプリを開いたときの「ホーム」画面。利用時間(日/週/年)のグラフと、
+// 各モードへのクイックスタートを表示する(Claude CodeのNew session画面のような位置づけ)。
+function Home({ onSelectChannel }) {
+  const [granularity, setGranularity] = useState('day')
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    apiFetch(`/activity/summary?granularity=${granularity}`)
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data) => {
+        if (!cancelled) setItems(data?.items || [])
+      })
+      .catch(() => {
+        if (!cancelled) setItems([])
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [granularity])
+
+  const maxMinutes = Math.max(1, ...items.map((it) => it.minutes))
+  const totalMinutes = items.reduce((sum, it) => sum + it.minutes, 0)
+
+  return (
+    <div className="home">
+      <div className="home-hero">
+        <div className="home-hero-brand"><BrandLockup /></div>
+        <p className="home-hero-sub">今日は何をしますか?</p>
+      </div>
+
+      <section className="home-panel">
+        <div className="home-panel-header">
+          <div className="home-panel-heading">
+            <h2>利用時間</h2>
+            {!loading && totalMinutes > 0 && (
+              <span className="home-panel-total">
+                {formatActivityMinutes(totalMinutes)}
+                <small>合計</small>
+              </span>
+            )}
+          </div>
+          <div className="home-range-toggle">
+            {ACTIVITY_RANGE_OPTIONS.map((opt) => (
+              <button
+                type="button"
+                key={opt.id}
+                className={`home-range-btn ${granularity === opt.id ? 'active' : ''}`}
+                onClick={() => setGranularity(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="empty-state">読み込み中…</div>
+        ) : totalMinutes === 0 ? (
+          <div className="empty-state">まだ利用記録がありません。下から機能を使ってみましょう。</div>
+        ) : (
+          <div className="home-chart" role="img" aria-label="期間ごとの利用時間">
+            {items.map((it, i) => {
+              const label = formatActivityBucketLabel(it.bucket, granularity)
+              const tooltip = `${label}: ${formatActivityMinutes(it.minutes)}`
+              return (
+                <div
+                  className={`home-chart-col ${i === items.length - 1 ? 'current' : ''}`}
+                  key={it.bucket}
+                  aria-label={tooltip}
+                >
+                  <div className="home-chart-bar-track" data-tooltip={tooltip}>
+                    <div
+                      className={`home-chart-bar ${it.minutes <= 0 ? 'empty' : ''}`}
+                      style={{ height: it.minutes <= 0 ? '2px' : `${Math.max(4, (it.minutes / maxMinutes) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="home-chart-label">{label}</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="home-panel">
+        <h2>はじめる</h2>
+        <div className="home-quickstart-grid">
+          {MODE_DEFS.map((m) => (
+            <button
+              type="button"
+              key={m.id}
+              className="home-quickstart-card"
+              onClick={() => onSelectChannel(m.id)}
+            >
+              <span className="home-quickstart-tag">{m.tag}</span>
+              <span className="home-quickstart-desc">{m.short}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+async function downloadModeHistoryExcel(entryId, filename) {
+  const resp = await apiFetch(`/mode-history/${entryId}/download`)
+  if (!resp.ok) return
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+// outline以外のモード(logic-guide/task-generator/study-notes/tasks)で履歴項目を開いたときの
+// 読み取り専用プレビュー。各モードは会話やアイテムをタブ内で再構築せず、生成当時の内容を
+// そのまま表示するだけにして、実装をモード横断で単純に保っている。
+function HistoryPreviewPanel({ record, onClose }) {
+  const { mode, title, payload, created_at } = record
+  return (
+    <div className="history-preview-overlay" onClick={onClose}>
+      <div className="history-preview-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="history-preview-header">
+          <h3>{title}</h3>
+          <button type="button" className="history-preview-close" aria-label="閉じる" onClick={onClose}><X aria-hidden="true" /></button>
+        </div>
+        <div className="history-preview-date">{new Date(created_at).toLocaleString('ja-JP')}</div>
+        <div className="history-preview-body">
+          {mode === 'logic-guide' && (
+            <>
+              <p className="history-preview-meta">
+                {payload.university} ／ {payload.faculty}{payload.department && ` ／ ${payload.department}`}
+              </p>
+              <div className="thread">
+                {(payload.messages || []).map((m, i) => (
+                  <div className={`message message-${m.role}`} key={i}>
+                    <div className="message-author">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                    <div className="message-body">
+                      {m.role === 'user' ? <p>{m.content}</p> : <MessageContent content={m.content} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          {mode === 'task-generator' && (
+            <>
+              <p className="history-preview-meta">{payload.description}</p>
+              {payload.kind === 'excel' ? (
+                <button
+                  type="button"
+                  className="export-button"
+                  onClick={() => downloadModeHistoryExcel(record.id, payload.filename)}
+                >
+                  <FileSpreadsheet aria-hidden="true" /> {payload.filename} をダウンロード
+                </button>
+              ) : (
+                <div className="paper-body">
+                  <PaperBodyContent content={payload.content} />
+                </div>
+              )}
+            </>
+          )}
+
+          {mode === 'study-notes' && (
+            <div className="paper-body">
+              <PaperBodyContent content={payload.content} />
+            </div>
+          )}
+
+          {mode === 'tasks' && (
+            <div className="task-item-main">
+              <div className="task-item-description">{payload.description}</div>
+              <div className="task-item-meta">
+                所要時間の目安: 約{formatMinutes(payload.estimated_minutes)}
+                {payload.deadline && <> ・ 締切: {formatDateTime(payload.deadline)}</>}
+                ・ リマインド予定: {formatDateTime(payload.remind_at)}
+              </div>
+              {payload.reasoning && <div className="task-item-reasoning">{payload.reasoning}</div>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Toast({ message }) {
   if (!message) return null
   return <div className="toast">{message}</div>
@@ -1716,11 +2025,25 @@ function formatBibtex(papers) {
     .join('\n\n')
 }
 
+// 関連文献パネルの言語セレクタで選べる言語。'natural'は原文表示(翻訳なし)。
+const LITERATURE_LANGUAGES = [
+  { code: 'natural', label: 'Natural' },
+  { code: 'en', label: 'English' },
+  { code: 'ja', label: '日本語' },
+  { code: 'zh', label: '中文' },
+  { code: 'es', label: 'Español' },
+]
+
 // 右パネル: 現在のスレッドで最後に生成されたアウトラインの目次(ジャンプ付き)と、
 // 全節の関連文献をまとめて選択・コピーできる。outlineモードでのみ表示する。
 function OutlinePanel({ outline, idPrefix, onFlash }) {
   const [selected, setSelected] = useState({})
   const [style, setStyle] = useState('list')
+  const [literatureLang, setLiteratureLang] = useState('natural')
+  const [translationCache, setTranslationCache] = useState({})
+  const [translating, setTranslating] = useState(false)
+  const [translateError, setTranslateError] = useState(null)
+  const [retryTick, setRetryTick] = useState(0)
 
   const sections = outline.sections || []
   const papers = []
@@ -1732,6 +2055,47 @@ function OutlinePanel({ outline, idPrefix, onFlash }) {
   const selectedCount = Object.values(selected).filter(Boolean).length
   const targets = selectedCount > 0 ? papers.filter((p) => selected[p.key]) : papers
 
+  // 文献の組み合わせ+言語ごとにキャッシュする(同じ文献を再翻訳しない/別アウトラインの
+  // 文献と取り違えないよう、キーにタイトルまで含める)。
+  const papersSignature = papers.map((p) => `${p.key}:${p.title}`).join('|')
+  const cacheKey = `${literatureLang}::${papersSignature}`
+
+  useEffect(() => {
+    if (literatureLang === 'natural' || papers.length === 0) return
+    if (translationCache[cacheKey]) return
+
+    let cancelled = false
+    setTranslating(true)
+    setTranslateError(null)
+    ;(async () => {
+      try {
+        const resp = await apiFetch('/literature/translate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ titles: papers.map((p) => p.title), target_lang: literatureLang }),
+        })
+        if (!resp.ok) throw new Error(await readErrorMessage(resp))
+        const data = await resp.json()
+        if (cancelled) return
+        const map = {}
+        papers.forEach((p, i) => { map[p.key] = data.titles?.[i] ?? p.title })
+        setTranslationCache((prev) => ({ ...prev, [cacheKey]: map }))
+      } catch (err) {
+        if (!cancelled) setTranslateError(String(err))
+      } finally {
+        if (!cancelled) setTranslating(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cacheKey, literatureLang, retryTick])
+
+  function displayTitle(paper) {
+    if (literatureLang === 'natural') return paper.title
+    return translationCache[cacheKey]?.[paper.key] ?? paper.title
+  }
+
   function toggleSelect(key) {
     setSelected((prev) => ({ ...prev, [key]: !prev[key] }))
   }
@@ -1741,7 +2105,8 @@ function OutlinePanel({ outline, idPrefix, onFlash }) {
   }
 
   async function copyBibliography() {
-    const text = style === 'bibtex' ? formatBibtex(targets) : formatCitationList(targets)
+    const withTranslatedTitles = targets.map((p) => ({ ...p, title: displayTitle(p) }))
+    const text = style === 'bibtex' ? formatBibtex(withTranslatedTitles) : formatCitationList(withTranslatedTitles)
     try {
       await navigator.clipboard.writeText(text)
       onFlash?.(`${targets.length}件をコピーしました`)
@@ -1773,6 +2138,29 @@ function OutlinePanel({ outline, idPrefix, onFlash }) {
           <span>関連文献</span>
           <span className="outline-panel-count">{papers.length ? `${papers.length}件` : ''}</span>
         </div>
+        <div className="literature-lang-row" role="tablist" aria-label="関連文献の表示言語">
+          {LITERATURE_LANGUAGES.map((l) => (
+            <button
+              type="button"
+              key={l.code}
+              role="tab"
+              aria-selected={literatureLang === l.code}
+              className={`literature-lang-pill ${literatureLang === l.code ? 'active' : ''}`}
+              onClick={() => setLiteratureLang(l.code)}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+        {translating && <p className="literature-translate-status">翻訳中…</p>}
+        {translateError && !translating && (
+          <p className="literature-translate-status literature-translate-error">
+            翻訳に失敗しました。原文を表示しています。({translateError})
+            <button type="button" className="literature-translate-retry" onClick={() => setRetryTick((n) => n + 1)}>
+              再試行
+            </button>
+          </p>
+        )}
         <div className="outline-panel-papers">
           {papers.length === 0 && <p className="outline-panel-empty">まだ文献はありません。</p>}
           {papers.map((p) => (
@@ -1787,7 +2175,7 @@ function OutlinePanel({ outline, idPrefix, onFlash }) {
                   {selected[p.key] ? '✓' : ''}
                 </button>
                 <a href={p.url} target="_blank" rel="noreferrer" className="paper-card-link">
-                  <span className="paper-card-title">{p.title}</span>
+                  <span className="paper-card-title">{displayTitle(p)}</span>
                   <span className="paper-card-meta">
                     {p.authors && p.authors.length > 0 ? p.authors.join(', ') : '著者不明'}
                     {p.year ? ` · ${p.year}` : ''}
@@ -1936,8 +2324,8 @@ function SecuritySettings({ onClose }) {
   return (
     <div className="security-panel">
       <div className="security-panel-header">
-        <h3>🔒 セキュリティ設定</h3>
-        <button type="button" className="security-panel-close" onClick={onClose} aria-label="閉じる">×</button>
+        <h3><ShieldCheck aria-hidden="true" /> セキュリティ設定</h3>
+        <button type="button" className="security-panel-close" onClick={onClose} aria-label="閉じる"><X aria-hidden="true" /></button>
       </div>
 
       <section className="security-panel-section">
@@ -2020,11 +2408,133 @@ function SecuritySettings({ onClose }) {
   )
 }
 
+function AdminStat({ label, value, sub }) {
+  return (
+    <div className="admin-stat section-card">
+      <div className="admin-stat-label">{label}</div>
+      <div className="admin-stat-value">{value}</div>
+      {sub && <div className="admin-stat-sub">{sub}</div>}
+    </div>
+  )
+}
+
+// 運営者向け管理ダッシュボード(/admin)。app.py側の/admin/overviewが
+// ADMIN_EMAILS/ADMIN_USER_IDSに該当しないユーザーには403を返すので、
+// その場合はここでエラーメッセージだけを表示する。
+function AdminDashboard({ onLogout, onBack }) {
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const resp = await apiFetch('/admin/overview')
+      if (resp.status === 403) {
+        setError('このアカウントには管理者権限がありません。')
+        return
+      }
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      setData(await resp.json())
+    } catch (e) {
+      setError(e.message || '読み込みに失敗しました。')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  return (
+    <div className="app-root admin-root">
+      <div className="topbar">
+        <span className="topbar-brand">THYNORA</span>
+        <span className="topbar-sep">/</span>
+        <span className="topbar-title"># admin</span>
+        <div className="topbar-spacer" />
+        <button type="button" className="topbar-search" onClick={load} disabled={loading}>
+          更新
+        </button>
+        <button type="button" className="topbar-search" onClick={onBack}>
+          アプリに戻る
+        </button>
+        <button type="button" className="topbar-search" onClick={onLogout}>
+          ログアウト
+        </button>
+      </div>
+
+      <div className="admin-body">
+        {loading && !data && <div className="app-loading">読み込み中…</div>}
+        {error && <div className="error admin-error">{error}</div>}
+
+        {data && (
+          <>
+            <div className="admin-grid">
+              <AdminStat
+                label="総ユーザー数"
+                value={data.users.total}
+                sub={`直近7日 +${data.users.new_7d}人 / 直近30日 +${data.users.new_30d}人`}
+              />
+              <AdminStat
+                label="アクティブユーザー(24時間)"
+                value={data.users.active_24h}
+                sub={`直近7日では${data.users.active_7d}人`}
+              />
+              <AdminStat
+                label="有料ユーザー"
+                value={data.plans.paying}
+                sub={`Pro ${data.plans.pro}人 / Max ${data.plans.max}人 / Free ${data.plans.free}人`}
+              />
+              <AdminStat
+                label="今期のトークン利用量(全ユーザー合計)"
+                value={data.usage.tokens_used_this_period.toLocaleString('ja-JP')}
+                sub="ユーザーごとに月初(UTC)でロールオーバー"
+              />
+              <AdminStat
+                label="生成件数(累計)"
+                value={data.generations.total}
+                sub={`直近7日 ${data.generations.last_7d}件 / 直近30日 ${data.generations.last_30d}件`}
+              />
+            </div>
+
+            <section className="section-card admin-events">
+              <h3>直近のセキュリティイベント</h3>
+              {data.recent_security_events.length === 0 ? (
+                <p className="security-panel-hint">まだ記録がありません。</p>
+              ) : (
+                <ul className="security-event-list">
+                  {data.recent_security_events.map((ev, i) => (
+                    <li key={i}>
+                      <span className="security-event-type">{formatEventType(ev.event_type)}</span>
+                      <span className="admin-event-subject">{ev.subject}</span>
+                      <span className="security-event-date">
+                        {new Date(ev.created_at).toLocaleString('ja-JP', {
+                          month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <p className="admin-generated-at">最終更新: {new Date(data.generated_at).toLocaleString('ja-JP')}</p>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
-  // どのチャンネル(機能)を表示するか。'outline'=論文アウトライン生成、'logic-guide'=大学授業案内チャット、
+  // どのチャンネル(機能)を表示するか。'home'=利用時間の確認とクイックスタート、
+  // 'outline'=論文アウトライン生成、'logic-guide'=大学授業案内チャット、
   // 'tasks'=学習タスクの所要時間見積もり・リマインド、'task-generator'=課題の成果物(文章・Excel等)の生成、
   // 'study-notes'=レポート・資料から暗記すべき要点や流れを整理。
-  const [channel, setChannel] = useState('outline')
+  const [channel, setChannel] = useState('home')
 
   // スマホ幅ではサイドバーをオフキャンバス(ドロワー)化するための開閉状態。
   // デスクトップ幅ではCSS側でこの状態自体を無視するので、常にトグル可能にしておいて問題ない。
@@ -2038,6 +2548,24 @@ export default function App() {
   // ログイン状態(Apple/Google/GitHub/開発用ログインのいずれかで取得したセッショントークン)。
   const [authToken, setAuthTokenState] = useState(() => getStoredToken())
   const [authExchanging, setAuthExchanging] = useState(false)
+
+  // /admin(管理ダッシュボード)への遷移をSPA内で扱うための現在パス。
+  // フルページ遷移(location.href)にしないのは、開発時のVite devサーバーが
+  // '/admin'自体へのプロキシを持たない(APIの'/admin/overview'だけを転送する)ため。
+  const [pathname, setPathname] = useState(window.location.pathname)
+
+  function navigate(path) {
+    window.history.pushState({}, '', path)
+    setPathname(path)
+  }
+
+  useEffect(() => {
+    function handlePopState() {
+      setPathname(window.location.pathname)
+    }
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   function setAuthToken(token) {
     setAuthTokenState(token)
@@ -2103,6 +2631,26 @@ export default function App() {
   useEffect(() => {
     if (authToken) fetchUsage()
   }, [authToken, fetchUsage])
+
+  // ホーム画面の利用時間グラフ向けに、タブが表示されている間だけ60秒おきに生存確認を送る。
+  // Claude APIは呼ばないのでトークンやレート制限への影響はない。
+  useEffect(() => {
+    if (!authToken) return undefined
+
+    function sendPing() {
+      if (document.visibilityState === 'visible') {
+        apiFetch('/activity/ping', { method: 'POST' }).catch(() => {})
+      }
+    }
+
+    sendPing()
+    const interval = setInterval(sendPing, 60000)
+    document.addEventListener('visibilitychange', sendPing)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', sendPing)
+    }
+  }, [authToken])
 
   const [billingLoading, setBillingLoading] = useState(false)
 
@@ -2240,15 +2788,24 @@ export default function App() {
 
   const [historyItems, setHistoryItems] = useState([])
   const [historyQuery, setHistoryQuery] = useState('')
-  // ON にすると通常の履歴一覧の代わりに🔒シークレット履歴だけを表示する(混在させない)。
+  // ON にすると通常の履歴一覧の代わりにシークレット履歴だけを表示する(混在させない)。
   const [showSecretHistory, setShowSecretHistory] = useState(false)
+  // outline以外のモードで履歴項目を開いたときの、読み取り専用プレビュー(HistoryPreviewPanel)の中身。
+  const [historyPreview, setHistoryPreview] = useState(null)
 
-  const fetchHistory = useCallback(async (query, scope) => {
+  // outlineは専用の/historyエンドポイント(generationsテーブル)、それ以外の4モードは
+  // 共通の/mode-history(history_entriesテーブル)を使う。どちらもitem.idを不透明な値として
+  // 同じ形(id/title/created_at/is_private)で扱えるようにしてあるので、以降のUIは分岐不要。
+  const historyBase = channel === 'outline' ? '/history' : '/mode-history'
+
+  const fetchHistory = useCallback(async (query, scope, mode) => {
     try {
       const params = new URLSearchParams()
       if (query && query.trim()) params.set('q', query.trim())
       if (scope) params.set('scope', scope)
-      const resp = await apiFetch(`/history${params.toString() ? `?${params}` : ''}`)
+      if (mode !== 'outline') params.set('mode', mode)
+      const base = mode === 'outline' ? '/history' : '/mode-history'
+      const resp = await apiFetch(`${base}${params.toString() ? `?${params}` : ''}`)
       if (!resp.ok) {
         setSidebarError(`履歴の取得に失敗しました: ${await readErrorMessage(resp)}`)
         return
@@ -2261,21 +2818,26 @@ export default function App() {
   }, [])
 
   const refreshHistory = useCallback(
-    () => fetchHistory(historyQuery, showSecretHistory ? 'private' : undefined),
-    [fetchHistory, historyQuery, showSecretHistory]
+    () => fetchHistory(historyQuery, showSecretHistory ? 'private' : undefined, channel),
+    [fetchHistory, historyQuery, showSecretHistory, channel]
   )
 
+  // タブ(モード)を切り替えたら、直前のモードでの検索語を引きずらず一覧を出し直す。
   useEffect(() => {
-    if (!authToken) return
+    setHistoryQuery('')
+  }, [channel])
+
+  useEffect(() => {
+    if (!authToken || channel === 'home') return
     const handle = setTimeout(refreshHistory, historyQuery ? 300 : 0)
     return () => clearTimeout(handle)
-  }, [authToken, historyQuery, showSecretHistory, refreshHistory])
+  }, [authToken, historyQuery, showSecretHistory, refreshHistory, channel])
 
   async function handleDeleteHistoryItem(e, id) {
     e.stopPropagation()
     if (!window.confirm('この履歴を削除しますか？')) return
     try {
-      const resp = await apiFetch(`/history/${id}`, { method: 'DELETE' })
+      const resp = await apiFetch(`${historyBase}/${id}`, { method: 'DELETE' })
       if (resp.ok) {
         refreshHistory()
       } else {
@@ -2289,7 +2851,7 @@ export default function App() {
   async function handleTogglePrivacy(e, item) {
     e.stopPropagation()
     try {
-      const resp = await apiFetch(`/history/${item.id}/private`, {
+      const resp = await apiFetch(`${historyBase}/${item.id}/private`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ is_private: !item.is_private }),
@@ -2334,6 +2896,21 @@ export default function App() {
   }
 
   async function openHistoryItem(item) {
+    // outline以外は会話・アイテムをタブに再構築せず、その場で読み取り専用プレビューを開くだけ
+    if (channel !== 'outline') {
+      try {
+        const resp = await apiFetch(`/mode-history/${item.id}`)
+        if (!resp.ok) {
+          setSidebarError(`履歴の読み込みに失敗しました: ${await readErrorMessage(resp)}`)
+          return
+        }
+        setHistoryPreview(await resp.json())
+      } catch (err) {
+        setSidebarError(`履歴の読み込みに失敗しました: ${String(err)}`)
+      }
+      return
+    }
+
     if (!confirmDiscardComposerIfNeeded()) return
     try {
       const resp = await apiFetch(`/history/${item.id}`)
@@ -2420,12 +2997,20 @@ export default function App() {
 
   function buildPaletteItems() {
     const q = paletteQuery.trim().toLowerCase()
-    const items = MODE_DEFS.map((m) => ({
-      kind: 'MODE',
-      label: `${m.tag}  ${m.short}`,
-      hint: m.key,
-      run: () => { selectChannel(m.id); closePalette() },
-    }))
+    const items = [
+      {
+        kind: 'MODE',
+        label: '# home  利用時間の確認とクイックスタート',
+        hint: '',
+        run: () => { selectChannel('home'); closePalette() },
+      },
+      ...MODE_DEFS.map((m) => ({
+        kind: 'MODE',
+        label: `${m.tag}  ${m.short}`,
+        hint: m.key,
+        run: () => { selectChannel(m.id); closePalette() },
+      })),
+    ]
     if (channel === 'outline') {
       historyItems.slice(0, 8).forEach((h) => {
         items.push({ kind: '履歴', label: h.title, hint: '', run: () => { openHistoryItem(h); closePalette() } })
@@ -2486,7 +3071,8 @@ export default function App() {
   const activeMode = MODE_DEFS.find((m) => m.id === channel) ?? MODE_DEFS[0]
   // outlineモードだけスレッド(セッション)を持つので、タイトルはそのタブ名を表示する。
   // それ以外のモードは単一のスレッドしかないので、モードのタグ名を代わりに出す。
-  const topbarTitle = channel === 'outline' ? (activeSession?.title || NEW_TAB_TITLE) : activeMode.tag
+  const topbarTitle =
+    channel === 'home' ? '# home' : channel === 'outline' ? (activeSession?.title || NEW_TAB_TITLE) : activeMode.tag
 
   if (authExchanging) {
     return <div className="app-root app-loading">サインイン処理中…</div>
@@ -2494,6 +3080,10 @@ export default function App() {
 
   if (!authToken) {
     return <LoginScreen onToken={setAuthToken} />
+  }
+
+  if (pathname === '/admin') {
+    return <AdminDashboard onLogout={handleLogout} onBack={() => navigate('/')} />
   }
 
   if (!sessionsLoaded || !activeSession) {
@@ -2509,9 +3099,9 @@ export default function App() {
           aria-label="メニューを開く"
           onClick={() => setSidebarOpen(true)}
         >
-          ☰
+          <Menu aria-hidden="true" />
         </button>
-        <span className="topbar-brand">NOVERA</span>
+        <span className="topbar-brand"><BrandLockup /></span>
         <span className="topbar-sep">/</span>
         <span className="topbar-title">{topbarTitle}</span>
         <div className="topbar-spacer" />
@@ -2548,7 +3138,7 @@ export default function App() {
               )}
             </div>
           ))}
-          <button type="button" className="tab-add" aria-label="新しいタブを追加" onClick={addTab}>＋</button>
+          <button type="button" className="tab-add" aria-label="新しいタブを追加" onClick={addTab}><Plus aria-hidden="true" /></button>
         </div>
       )}
 
@@ -2572,7 +3162,7 @@ export default function App() {
         )}
         <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
           <div className="sidebar-header-row">
-            <div className="sidebar-brand">📚 Novera</div>
+            <BrandLockup className="sidebar-brand" />
             <button
               type="button"
               className="sidebar-close"
@@ -2583,6 +3173,18 @@ export default function App() {
             </button>
           </div>
           <div className="mode-list">
+            <button
+              type="button"
+              aria-label="# home"
+              className={`mode-item ${channel === 'home' ? 'active' : ''}`}
+              onClick={() => selectChannel('home')}
+            >
+              <span className="mode-item-bar" />
+              <span className="mode-item-body">
+                <span className="mode-item-tag"><House aria-hidden="true" /> home</span>
+                <span className="mode-item-short">利用時間の確認とクイックスタート</span>
+              </span>
+            </button>
             {MODE_DEFS.map((m) => (
               <button
                 type="button"
@@ -2601,11 +3203,11 @@ export default function App() {
             ))}
           </div>
 
-          {channel === 'outline' && (
+          {channel !== 'home' && (
           <div className="sidebar-history">
             <div className="sidebar-history-header">
               <div className="sidebar-history-title">
-                {showSecretHistory ? '🔒 シークレット履歴' : '履歴'}
+                {showSecretHistory ? `シークレット履歴・${activeMode.tag}` : `履歴・${activeMode.tag}`}
               </div>
               <label className="secret-toggle" title="シークレット履歴を表示">
                 <input
@@ -2613,7 +3215,7 @@ export default function App() {
                   checked={showSecretHistory}
                   onChange={(e) => setShowSecretHistory(e.target.checked)}
                 />
-                🔒
+                <LockKeyhole aria-hidden="true" />
               </label>
             </div>
             <input
@@ -2653,7 +3255,7 @@ export default function App() {
                       aria-label={`${item.title}を${item.is_private ? '公開に戻す' : 'シークレットにする'}`}
                       onClick={(e) => handleTogglePrivacy(e, item)}
                     >
-                      {item.is_private ? '🔓' : '🔒'}
+                      {item.is_private ? <LockKeyhole aria-hidden="true" /> : <LockKeyholeOpen aria-hidden="true" />}
                     </button>
                     <button
                       type="button"
@@ -2662,15 +3264,17 @@ export default function App() {
                       aria-label={`${item.title}を削除`}
                       onClick={(e) => handleDeleteHistoryItem(e, item.id)}
                     >
-                      🗑
+                      <Trash2 aria-hidden="true" />
                     </button>
                   </li>
                 ))}
               </ul>
             )}
-            <button type="button" className="sidebar-new-thread" aria-label="新規スレッド" onClick={addTab}>
-              ＋ 新規スレッド <span className="topbar-kbd">⌘N</span>
-            </button>
+            {channel === 'outline' && (
+              <button type="button" className="sidebar-new-thread" aria-label="新規スレッド" onClick={addTab}>
+                <Plus aria-hidden="true" /> 新規スレッド <span className="topbar-kbd">⌘N</span>
+              </button>
+            )}
           </div>
           )}
 
@@ -2722,8 +3326,17 @@ export default function App() {
               )
             )}
 
-            <button type="button" className="security-settings-button" onClick={() => setShowSecurityPanel(true)}>
-              🔒 セキュリティ設定
+            {usage?.is_admin && (
+              <button
+                type="button"
+                className="security-settings-button"
+                onClick={() => navigate('/admin')}
+              >
+                <LayoutDashboard aria-hidden="true" /> 管理ダッシュボード
+              </button>
+            )}
+            <button type="button" className="security-settings-button" aria-label="🔒 セキュリティ設定" onClick={() => setShowSecurityPanel(true)}>
+              <ShieldCheck aria-hidden="true" /> セキュリティ設定
             </button>
             <button type="button" className="logout-button" onClick={handleLogout}>
               ログアウト
@@ -2740,7 +3353,9 @@ export default function App() {
         )}
 
         <div className="main">
-          {channel === 'outline' ? (
+          {channel === 'home' ? (
+            <Home onSelectChannel={selectChannel} />
+          ) : channel === 'outline' ? (
             <>
               <header className="main-header">
                 <h1># outline-generator</h1>
@@ -2763,7 +3378,7 @@ export default function App() {
                 <p>大学・学部・学科を選んで、気になる授業内容をAIに質問できます</p>
               </header>
 
-              <CourseGuide />
+              <CourseGuide onGenerated={refreshHistory} />
             </>
           ) : channel === 'tasks' ? (
             <>
@@ -2772,7 +3387,7 @@ export default function App() {
                 <p>タスク内容を送ると、AIが所要時間を見積もり、頃合いにメールでリマインドします</p>
               </header>
 
-              <TaskReminders />
+              <TaskReminders onGenerated={refreshHistory} />
             </>
           ) : channel === 'task-generator' ? (
             <>
@@ -2781,7 +3396,7 @@ export default function App() {
                 <p>課題の内容を送ると、AIが文章やExcelの表など、実際に提出できる成果物を作成します</p>
               </header>
 
-              <TaskGenerator />
+              <TaskGenerator onGenerated={refreshHistory} />
             </>
           ) : (
             <>
@@ -2790,7 +3405,7 @@ export default function App() {
                 <p>レポート・資料を貼り付けるか添付すると、暗記すべき要点と全体の流れを整理します</p>
               </header>
 
-              <StudyNotes />
+              <StudyNotes onGenerated={refreshHistory} />
             </>
           )}
         </div>
@@ -2803,6 +3418,10 @@ export default function App() {
           />
         )}
       </div>
+
+      {historyPreview && (
+        <HistoryPreviewPanel record={historyPreview} onClose={() => setHistoryPreview(null)} />
+      )}
 
       {paletteOpen && (
         <CommandPalette

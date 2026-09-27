@@ -1,0 +1,9 @@
+{
+  "appId": "com.thynora.app",
+  "appName": "THYNORA",
+  "webDir": "www",
+  "server": {
+    "url": "https://app.example.com",
+    "cleartext": false
+  }
+}

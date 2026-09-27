@@ -157,6 +157,14 @@ function mockFetch({
       return Promise.resolve(jsonResponse(usage))
     }
 
+    if (url === '/activity/ping' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ status: 'ok' }))
+    }
+
+    if (typeof url === 'string' && url.startsWith('/activity/summary')) {
+      return Promise.resolve(jsonResponse({ items: [] }))
+    }
+
     if (url === '/auth/dev' && method === 'POST') {
       return Promise.resolve(jsonResponse({ token: 'dev-token' }))
     }
@@ -282,6 +290,13 @@ async function submitTopic(topic = '生成AIと教育') {
   fireEvent.click(screen.getByRole('button', { name: /送信/ }))
 }
 
+async function renderOutlineApp() {
+  const rendered = render(<App />)
+  fireEvent.click(await screen.findByRole('button', { name: '# outline-generator' }))
+  await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
+  return rendered
+}
+
 beforeEach(() => {
   localStorage.clear()
   // 大半のテストはログイン済み状態のアプリ本体を検証したいので、あらかじめトークンを
@@ -292,14 +307,14 @@ beforeEach(() => {
 
 describe('App', () => {
   it('shows the empty-state hint when there are no messages yet', async () => {
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
   })
 
   it('asks for a target length after the first submit, then generates an outline once chosen', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE), jsonResponse(OUTLINE_RESPONSE)] })
 
-    render(<App />)
+    await renderOutlineApp()
     await submitTopic()
 
     await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
@@ -314,7 +329,7 @@ describe('App', () => {
   it('shows an error message when the request fails', async () => {
     mockFetch({ generateResponses: [{ ok: false, status: 500, text: async () => 'boom' }] })
 
-    render(<App />)
+    await renderOutlineApp()
     await submitTopic()
 
     await waitFor(() => expect(screen.getAllByText(/Error/).length).toBeGreaterThan(0))
@@ -328,7 +343,7 @@ describe('App', () => {
       ],
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await submitTopic()
 
     await waitFor(() => expect(screen.getAllByText(/topic is required/).length).toBeGreaterThan(0))
@@ -337,19 +352,19 @@ describe('App', () => {
   it('restores messages from the server on remount', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
 
-    const { unmount } = render(<App />)
+    const { unmount } = await renderOutlineApp()
     await submitTopic('生成AIと教育')
     await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
     unmount()
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
     expect(screen.getAllByText('生成AIと教育').length).toBeGreaterThan(0)
   })
 
   it('starts a fresh thread in a new tab, keeping the previous one reachable', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
-    render(<App />)
+    await renderOutlineApp()
     await submitTopic('生成AIと教育')
     await waitFor(() => expect(screen.getByText(LENGTH_QUESTION_RESPONSE.message)).toBeInTheDocument())
     expect(screen.getAllByText('生成AIと教育').length).toBeGreaterThan(0)
@@ -373,7 +388,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
 
     global.fetch.mockImplementationOnce((url) => {
@@ -405,7 +420,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('生成AI計画')).toBeInTheDocument())
     expect(screen.getByText('量子計画')).toBeInTheDocument()
 
@@ -423,7 +438,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTitle('この履歴を削除'))
@@ -440,7 +455,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
 
     fireEvent.click(screen.getByTitle('この履歴を削除'))
@@ -451,7 +466,7 @@ describe('App', () => {
 
   it('sends the stored session token as a Bearer header', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
-    render(<App />)
+    await renderOutlineApp()
     await submitTopic()
 
     await waitFor(() => {
@@ -463,7 +478,7 @@ describe('App', () => {
 
   it('sends the private flag from the composer checkbox', async () => {
     mockFetch({ generateResponses: [jsonResponse(LENGTH_QUESTION_RESPONSE)] })
-    render(<App />)
+    await renderOutlineApp()
 
     const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
     fireEvent.change(textarea, { target: { value: 'シークレットテーマ' } })
@@ -479,7 +494,7 @@ describe('App', () => {
 
   it('shows the usage indicator fetched from /me', async () => {
     mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro', tokens_used: 1234, tokens_quota: 200000 } })
-    render(<App />)
+    await renderOutlineApp()
 
     await waitFor(() => expect(screen.getByText('PRO')).toBeInTheDocument())
     expect(screen.getByText('1,234 / 200,000')).toBeInTheDocument()
@@ -487,7 +502,7 @@ describe('App', () => {
 
   it('shows upgrade buttons on the free plan and starts a Stripe checkout', async () => {
     mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'free' } })
-    render(<App />)
+    await renderOutlineApp()
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Proにアップグレード' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Maxにアップグレード' })).toBeInTheDocument()
@@ -518,7 +533,7 @@ describe('App', () => {
   })
 
   it('logs out and returns to the login screen', async () => {
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'ログアウト' }))
@@ -528,7 +543,7 @@ describe('App', () => {
   })
 
   it('returns to the login screen when a request comes back 401 (expired token)', async () => {
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
 
     global.fetch = vi.fn(() => Promise.resolve(jsonErrorResponse(401, 'token expired')))
@@ -547,7 +562,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('トグル計画')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: 'トグル計画をシークレットにする' }))
@@ -572,7 +587,7 @@ describe('App', () => {
       },
     })
 
-    const { container } = render(<App />)
+    const { container } = await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('公開計画')).toBeInTheDocument())
     expect(screen.queryByText('秘密計画')).not.toBeInTheDocument()
 
@@ -597,7 +612,7 @@ describe('App', () => {
       return Promise.resolve(jsonResponse({}))
     })
 
-    render(<App />)
+    await renderOutlineApp()
 
     await waitFor(() => expect(screen.getByText(/タブの読み込みに失敗しました/)).toBeInTheDocument())
     expect(screen.getByText(/internal server error/)).toBeInTheDocument()
@@ -614,7 +629,7 @@ describe('App', () => {
       },
     })
 
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getByText('過去の計画')).toBeInTheDocument())
 
     global.fetch.mockImplementationOnce((url, options) => {
@@ -631,7 +646,7 @@ describe('App', () => {
   })
 
   it('asks for confirmation before starting a new thread with unsaved composer input', async () => {
-    render(<App />)
+    await renderOutlineApp()
     await waitFor(() => expect(screen.getAllByText('新規タブ').length).toBeGreaterThan(0))
 
     const textarea = await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
@@ -669,7 +684,7 @@ describe('LoginScreen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /開発用ログイン/ }))
 
-    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('今日は何をしますか?')).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('dev-token')
   })
 
@@ -690,7 +705,7 @@ describe('LoginScreen', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'メールで登録してログインコードを発行' }))
 
-    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('今日は何をしますか?')).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('code-signup-token')
   })
 
@@ -707,7 +722,7 @@ describe('LoginScreen', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'ログインコードでログイン' }))
 
-    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('今日は何をしますか?')).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('code-login-token')
   })
 
@@ -829,7 +844,7 @@ describe('MFA login flow', () => {
     fireEvent.change(screen.getByPlaceholderText('6桁のコード'), { target: { value: MFA_TEST_CODE } })
     fireEvent.click(screen.getByRole('button', { name: 'コードを確認してログイン' }))
 
-    await waitFor(() => expect(screen.getByText(/テーマを入力し/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('今日は何をしますか?')).toBeInTheDocument())
     expect(localStorage.getItem('paper-assistant-token')).toBe('mfa-verified-token')
   })
 

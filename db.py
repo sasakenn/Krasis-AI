@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from crypto_utils import decrypt_text, encrypt_text
 
@@ -73,6 +73,20 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS history_entries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                title TEXT NOT NULL,
+                payload_json TEXT NOT NULL,
+                is_private INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS sessions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT NOT NULL,
@@ -124,6 +138,18 @@ def init_db() -> None:
                 detail TEXT NOT NULL DEFAULT ''
             )
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS activity_pings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_activity_pings_user_created ON activity_pings(user_id, created_at)"
         )
         conn.execute(
             """
@@ -270,6 +296,110 @@ def set_generation_privacy(user_id: str, generation_id: int, is_private: bool) -
         cursor = conn.execute(
             "UPDATE generations SET is_private = ? WHERE id = ? AND user_id = ?",
             (int(is_private), generation_id, user_id),
+        )
+        return cursor.rowcount > 0
+
+
+def save_history_entry(user_id: str, mode: str, title: str, payload: dict, is_private: bool = False) -> dict:
+    """logic-guide/task-generator/study-notes/tasksの各モードで共通に使う、汎用の履歴保存。
+
+    outline(論文アウトライン)だけは専用のgenerationsテーブルを使い続けるので対象外。
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO history_entries
+                (user_id, mode, created_at, updated_at, title, payload_json, is_private)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (user_id, mode, now, now, title, encrypt_text(json.dumps(payload, ensure_ascii=False)), int(is_private)),
+        )
+        return {"id": cursor.lastrowid, "mode": mode, "created_at": now, "updated_at": now, "title": title}
+
+
+def update_history_entry(user_id: str, entry_id: int, mode: str, title: str, payload: dict) -> bool:
+    """継続する会話(logic-guideなど)で、同じ履歴を新規行を増やさずに上書き更新する。"""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE history_entries SET title = ?, payload_json = ?, updated_at = ?
+            WHERE id = ? AND user_id = ? AND mode = ?
+            """,
+            (title, encrypt_text(json.dumps(payload, ensure_ascii=False)), now, entry_id, user_id, mode),
+        )
+        return cursor.rowcount > 0
+
+
+def list_history_entries(
+    user_id: str, mode: str, limit: int = 50, q: str | None = None, only_private: bool = False
+) -> list[dict]:
+    privacy_filter = 1 if only_private else 0
+    with _connect() as conn:
+        if q and q.strip():
+            like = f"%{q.strip()}%"
+            rows = conn.execute(
+                """
+                SELECT id, created_at, updated_at, title, is_private
+                FROM history_entries
+                WHERE user_id = ? AND mode = ? AND is_private = ? AND title LIKE ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, mode, privacy_filter, like, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, created_at, updated_at, title, is_private
+                FROM history_entries
+                WHERE user_id = ? AND mode = ? AND is_private = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (user_id, mode, privacy_filter, limit),
+            ).fetchall()
+
+    results = [dict(row) for row in rows]
+    for item in results:
+        item["is_private"] = bool(item["is_private"])
+    return results
+
+
+def get_history_entry(user_id: str, entry_id: int) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, mode, created_at, updated_at, title, payload_json, is_private
+            FROM history_entries
+            WHERE id = ? AND user_id = ?
+            """,
+            (entry_id, user_id),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    result = dict(row)
+    result["payload"] = json.loads(decrypt_text(result.pop("payload_json")))
+    result["is_private"] = bool(result["is_private"])
+    return result
+
+
+def delete_history_entry(user_id: str, entry_id: int) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "DELETE FROM history_entries WHERE id = ? AND user_id = ?", (entry_id, user_id)
+        )
+        return cursor.rowcount > 0
+
+
+def set_history_entry_privacy(user_id: str, entry_id: int, is_private: bool) -> bool:
+    with _connect() as conn:
+        cursor = conn.execute(
+            "UPDATE history_entries SET is_private = ? WHERE id = ? AND user_id = ?",
+            (int(is_private), entry_id, user_id),
         )
         return cursor.rowcount > 0
 
@@ -587,3 +717,185 @@ def list_security_events(subject: str, limit: int = 20) -> list[dict]:
             (subject, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+# フロントは画面を開いている間、60秒おきに/activity/pingを叩く。この間隔より少し
+# 広めに閾値を取り、連続するpingの間隔がこれ以内ならその間ずっと滞在していたとみなして
+# 滞在時間に加算する(離席・タブを閉じた後の間隔は加算しない)。
+_ACTIVITY_HEARTBEAT_INTERVAL_SECONDS = 60
+_ACTIVITY_MAX_GAP_SECONDS = _ACTIVITY_HEARTBEAT_INTERVAL_SECONDS * 1.5
+
+
+def record_activity_ping(user_id: str) -> None:
+    """ホーム画面の利用時間集計向けに、アクティブなタブからの生存確認を1件記録する。"""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO activity_pings (user_id, created_at) VALUES (?, ?)",
+            (user_id, datetime.now(timezone.utc).isoformat()),
+        )
+
+
+def _shift_months(d: date, delta_months: int) -> date:
+    month_index = d.month - 1 + delta_months
+    year = d.year + month_index // 12
+    month = month_index % 12 + 1
+    return d.replace(year=year, month=month, day=1)
+
+
+def _active_seconds_by_day(user_id: str, since: datetime) -> dict[str, float]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT created_at FROM activity_pings WHERE user_id = ? AND created_at >= ? ORDER BY created_at",
+            (user_id, since.isoformat()),
+        ).fetchall()
+
+    seconds_by_day: dict[str, float] = {}
+    prev: datetime | None = None
+    for row in rows:
+        ts = datetime.fromisoformat(row["created_at"])
+        if prev is not None:
+            gap = (ts - prev).total_seconds()
+            if 0 < gap <= _ACTIVITY_MAX_GAP_SECONDS:
+                day_key = prev.date().isoformat()
+                seconds_by_day[day_key] = seconds_by_day.get(day_key, 0.0) + gap
+        prev = ts
+    return seconds_by_day
+
+
+def get_activity_summary(user_id: str, granularity: str) -> list[dict]:
+    """ホーム画面の利用時間グラフ向けに、日別('day')直近14日・週別('week')直近12週・
+    月別('year')直近12か月のバケットで、アクティブだった時間(分)を集計して返す。
+    """
+    now = datetime.now(timezone.utc)
+    if granularity == "week":
+        since = now - timedelta(weeks=12)
+    elif granularity == "year":
+        since = now - timedelta(days=366)
+    else:
+        since = now - timedelta(days=14)
+
+    seconds_by_day = _active_seconds_by_day(user_id, since)
+
+    order: list[str] = []
+    buckets: dict[str, float] = {}
+    if granularity == "week":
+        for offset in range(11, -1, -1):
+            week_start = (now - timedelta(weeks=offset)).date()
+            week_start -= timedelta(days=week_start.weekday())
+            key = week_start.isoformat()
+            if key not in buckets:
+                buckets[key] = 0.0
+                order.append(key)
+    elif granularity == "year":
+        for offset in range(11, -1, -1):
+            key = _shift_months(now.date(), -offset).strftime("%Y-%m")
+            if key not in buckets:
+                buckets[key] = 0.0
+                order.append(key)
+    else:
+        for offset in range(13, -1, -1):
+            key = (now - timedelta(days=offset)).date().isoformat()
+            buckets[key] = 0.0
+            order.append(key)
+
+    for day_str, seconds in seconds_by_day.items():
+        day = date.fromisoformat(day_str)
+        if granularity == "week":
+            key = (day - timedelta(days=day.weekday())).isoformat()
+        elif granularity == "year":
+            key = day.strftime("%Y-%m")
+        else:
+            key = day.isoformat()
+        if key in buckets:
+            buckets[key] += seconds
+
+    return [{"bucket": key, "minutes": round(buckets[key] / 60, 1)} for key in order]
+
+
+def get_admin_overview() -> dict:
+    """運営者向け管理ダッシュボードの集計値をまとめて返す。
+
+    いずれも既存テーブル(users/entitlements/generations/activity_pings/security_events)を
+    読むだけで、書き込みは行わない。
+    """
+    now = datetime.now(timezone.utc)
+    since_24h = (now - timedelta(hours=24)).isoformat()
+    since_7d = (now - timedelta(days=7)).isoformat()
+    since_30d = (now - timedelta(days=30)).isoformat()
+
+    with _connect() as conn:
+        total_users = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+        new_users_7d = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE created_at >= ?", (since_7d,)
+        ).fetchone()["n"]
+        new_users_30d = conn.execute(
+            "SELECT COUNT(*) AS n FROM users WHERE created_at >= ?", (since_30d,)
+        ).fetchone()["n"]
+
+        plan_rows = conn.execute(
+            "SELECT plan, COUNT(*) AS n FROM entitlements GROUP BY plan"
+        ).fetchall()
+        plan_counts = {row["plan"]: row["n"] for row in plan_rows}
+
+        tokens_used_this_period = conn.execute(
+            "SELECT COALESCE(SUM(tokens_used), 0) AS n FROM entitlements"
+        ).fetchone()["n"]
+
+        paying_users = conn.execute(
+            "SELECT COUNT(*) AS n FROM entitlements WHERE stripe_customer_id IS NOT NULL"
+        ).fetchone()["n"]
+
+        total_generations = conn.execute("SELECT COUNT(*) AS n FROM generations").fetchone()["n"]
+        generations_7d = conn.execute(
+            "SELECT COUNT(*) AS n FROM generations WHERE created_at >= ?", (since_7d,)
+        ).fetchone()["n"]
+        generations_30d = conn.execute(
+            "SELECT COUNT(*) AS n FROM generations WHERE created_at >= ?", (since_30d,)
+        ).fetchone()["n"]
+
+        active_users_24h = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM activity_pings WHERE created_at >= ?",
+            (since_24h,),
+        ).fetchone()["n"]
+        active_users_7d = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) AS n FROM activity_pings WHERE created_at >= ?",
+            (since_7d,),
+        ).fetchone()["n"]
+
+        recent_security_events = [
+            dict(row)
+            for row in conn.execute(
+                """
+                SELECT created_at, event_type, subject, detail
+                FROM security_events
+                ORDER BY id DESC
+                LIMIT 10
+                """
+            ).fetchall()
+        ]
+
+    return {
+        "generated_at": now.isoformat(),
+        "users": {
+            "total": total_users,
+            "new_7d": new_users_7d,
+            "new_30d": new_users_30d,
+            "active_24h": active_users_24h,
+            "active_7d": active_users_7d,
+        },
+        "plans": {
+            "free": plan_counts.get("free", 0),
+            "pro": plan_counts.get("pro", 0),
+            "max": plan_counts.get("max", 0),
+            "paying": paying_users,
+        },
+        "usage": {
+            "tokens_used_this_period": tokens_used_this_period,
+        },
+        "generations": {
+            "total": total_generations,
+            "last_7d": generations_7d,
+            "last_30d": generations_30d,
+        },
+        "recent_security_events": recent_security_events,
+    }

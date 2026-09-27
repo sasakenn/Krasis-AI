@@ -14,6 +14,7 @@ os.environ.setdefault("DB_PATH", os.path.join(tempfile.mkdtemp(), "test.db"))
 # ここで先に設定しておけば .env の値より優先される)。
 DEFAULT_TEST_USER_ID = "conftest-default-test-user"
 os.environ.setdefault("DEV_BYPASS_USER_ID", DEFAULT_TEST_USER_ID)
+os.environ.setdefault("ADMIN_USER_IDS", DEFAULT_TEST_USER_ID)
 os.environ.setdefault("JWT_SECRET", "test-only-secret-do-not-use-in-production")
 os.environ.setdefault("APPLE_CLIENT_ID", "test.apple.client.id")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test.google.client.id")

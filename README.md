@@ -207,6 +207,22 @@ cd .. && ./venv/bin/python app.py
 
 `frontend/dist/`が存在しない場合(通常の開発時)は何も変わらず、これまで通りVite開発サーバー経由での利用になります。
 
+## クラウドへのデプロイ(Render)
+
+`Dockerfile`と`render.yaml`を用意済みです。SQLite(`data/app.db`)を使うため、永続ディスクが使えるプラン(Renderなら Starter 以上)が必要です。
+
+1. GitHubにこのリポジトリをpushする(未作成の場合はGitHubで新規リポジトリを作成してから):
+   ```bash
+   git remote add origin <GitHubリポジトリのURL>
+   git push -u origin main
+   ```
+2. [Render](https://dashboard.render.com/)で「New +」→「Blueprint」から、上記リポジトリを選ぶ。`render.yaml`を検出して、Webサービス(Docker)と永続ディスク(`/data`)が自動作成される。
+3. Renderのダッシュボードで、`sync: false`になっている環境変数(`STRIPE_SECRET_KEY`・`JWT_SECRET`・`DATA_ENCRYPTION_KEY`など)に値を入力する。ローカル開発用の値を使い回さず、本番用に新しく発行し直すこと。
+4. カスタムドメインを使う場合は、Renderの「Settings → Custom Domain」で追加し、表示されるCNAMEレコードをDNS側(ドメインのレジストラ/DNSサービス)に追加する。RenderがLet's EncryptでHTTPSを自動発行する。
+5. Stripeの本番Webhookエンドポイント(`https://<本番ドメイン>/billing/webhook`)をStripeダッシュボードの「開発者→Webhook」で作成し、`checkout.session.completed`・`customer.subscription.created`・`customer.subscription.updated`・`customer.subscription.deleted`を選択。発行された署名シークレット(`whsec_...`)を`STRIPE_WEBHOOK_SECRET`に設定する。
+6. Apple/Google/GitHubの各OAuth設定(各デベロッパーコンソール)に、本番ドメインのリダイレクトURI/オリジンを追加する。
+7. `FRONTEND_ORIGIN`は本番ドメイン(`https://<本番ドメイン>`)に設定する(Checkout/カスタマーポータル完了後の戻り先になる)。
+
 ## テスト
 
 ```bash
@@ -232,11 +248,13 @@ cd frontend && npm test             # フロントエンド(Vitest + Testing Lib
 - Google Cloud Console / GitHub でのOAuthクライアント作成、Stripeアカウント開設・商品作成(いずれも無料、Stripeのみ本人確認あり)
 - クラウドへの常時デプロイ(Dockerfile・ホスティング・HTTPS)
 - Electronで既存Reactをラップした Mac/Windows版の配布設定を`desktop/`に追加済み。Mac App Store向けにはStoreKit課金への切り替えが別途必要
+- Capacitorで既存Reactをラップした iOS/Android版の配布設定を`mobile/`に追加済み(WebViewでWeb版URLを表示する薄いラッパー)。このマシンにはCocoaPods/Android SDKが未導入のため、`ios/`・`android/`ネイティブプロジェクトの生成はまだ未実施。手順は`mobile/README.md`を参照
 - Apple Developer Program登録(有料、$99/年)・App Store Connectでのアプリ登録・審査提出(ここはユーザー本人のApple IDでの操作が必須)
+- Android版はGoogle Playデベロッパー登録(有料、$25の一度払い)・Play Consoleでのアプリ登録・審査提出が別途必要
 
-### 課金・Mac/Windows配布
+### 課金・Mac/Windows/スマホ配布
 
 - Web版と公式サイトからの直接配布は、実装済みのStripe Checkout / Customer Portalを利用する
-- Mac App Storeでデジタル機能を販売する場合は、Appleの規約上StoreKit課金を実装し、App Store Connectで商品を作成する
+- Mac App Store・Google Playでデジタル機能を販売する場合は、各ストアの規約上StoreKit/Google Play請求システムへの切り替えが必要になることがある。App Store Connect/Play Consoleで商品を作成する
 - Windows版は`desktop/README.md`の手順でNSISインストーラーを作成できる。Microsoft Store提出には署名とストア用メタデータが必要
-- デスクトップ版からAPIを別ドメインへ接続する場合は、`frontend/.env`の`VITE_API_ORIGIN`を設定する。Stripe秘密鍵などのサーバー秘密情報はアプリに含めない
+- デスクトップ版・スマホ版からAPIを別ドメインへ接続する場合は、`frontend/.env`の`VITE_API_ORIGIN`(Web版ビルド)と`mobile/config.example.json`の`webUrl`(スマホ版が読み込むWeb版URL)を設定する。Stripe秘密鍵などのサーバー秘密情報はアプリに含めない

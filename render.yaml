@@ -1,0 +1,56 @@
+# Renderの「Blueprint」機能用の定義。
+# Renderダッシュボードで「New +」→「Blueprint」からこのリポジトリを選ぶと、
+# このファイルを元にWebサービスと永続ディスクが自動で作成される。
+# sync: false の環境変数は値をリポジトリに含めず、Renderダッシュボード側で入力する。
+services:
+  - type: web
+    name: thynora
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /health
+    disk:
+      name: thynora-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FRONTEND_ORIGIN
+        value: https://app.krasis.xyz
+      - key: FORCE_HTTPS
+        value: "1"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: DATA_ENCRYPTION_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_ID_PRO
+        sync: false
+      - key: STRIPE_PRICE_ID_MAX
+        sync: false
+      - key: APPLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: SECURITY_CONTACT_EMAIL
+        sync: false

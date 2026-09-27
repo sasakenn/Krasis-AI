@@ -15,7 +15,14 @@ export default defineConfig({
       '/me': 'http://127.0.0.1:8000',
       '/billing': 'http://127.0.0.1:8000',
       '/tasks': 'http://127.0.0.1:8000',
-      '/task-generator': 'http://127.0.0.1:8000'
+      '/task-generator': 'http://127.0.0.1:8000',
+      '/study-notes': 'http://127.0.0.1:8000',
+      '/literature': 'http://127.0.0.1:8000',
+      '/mode-history': 'http://127.0.0.1:8000',
+      '/activity': 'http://127.0.0.1:8000',
+      // '/admin'自体はSPAのページパス(AdminDashboard)なのでプロキシせず、
+      // APIパスの'/admin/overview'だけをバックエンドへ転送する。
+      '/admin/overview': 'http://127.0.0.1:8000'
     }
   },
   test: {
