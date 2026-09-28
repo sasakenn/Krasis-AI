@@ -60,6 +60,7 @@ from db import (
     list_due_reminders,
     list_generations,
     list_history_entries,
+    list_login_events,
     list_security_events,
     list_sessions,
     list_tasks,
@@ -84,6 +85,7 @@ from mfa import provisioning_uri as mfa_provisioning_uri
 from mfa import verify_code as verify_mfa_code
 from course_guide import answer_course_question
 from exclamation import brush_off_if_exclamation
+from mailer import is_configured as is_mail_configured
 from mailer import send_email
 from outline import generate_outline
 from paper_writer import generate_paper_body
@@ -204,6 +206,9 @@ CODE_AUTH_LOCKOUT_SECONDS = int(os.getenv("CODE_AUTH_LOCKOUT_SECONDS", "900"))
 
 # 本番で1にすると、HTTPアクセスをHTTPSへリダイレクトしHSTSヘッダーを付与する。
 FORCE_HTTPS = os.getenv("FORCE_HTTPS", "").strip() in ("1", "true", "yes")
+# Renderは全サービスにRENDER=trueを自動設定する。ローカル開発(SMTP未設定でログ出力に
+# フォールバックする)と本番(メール送信が必須)を区別するために使う。
+IS_PRODUCTION = bool(os.getenv("RENDER"))
 
 # /course-chat 1件あたりClaude APIを呼ぶため、/generateと同様にユーザーごとの
 # 1分あたりの上限リクエスト数でコスト暴走を防ぐ。0以下で無効化。
@@ -639,43 +644,75 @@ def _attach_literature(outline: dict, limit: int = 3) -> dict:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "mail_configured": is_mail_configured()}
 
 
-def _issue_session_token(provider: str, claims: dict) -> dict:
+def _client_ip(request: Request) -> str:
+    """プロキシ(Render等)経由のリクエストでも発信元IPを取れるよう、
+    まずX-Forwarded-Forの先頭(クライアントに最も近い側)を見る。"""
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _client_user_agent(request: Request) -> str:
+    return request.headers.get("user-agent", "")[:300]
+
+
+PROVIDER_LABELS = {"apple": "Apple", "google": "Google", "github": "GitHub"}
+
+
+def _issue_session_token(provider: str, claims: dict, request: Request) -> dict:
     """検証済みclaimsから内部user_id(provider:sub)を組み立て、セッショントークンを発行する。
 
     プロバイダーが違えば同じ人でも別アカウント扱いになる(自動アカウント統合はしない)。
     """
     user_id = f"{provider}:{claims['sub']}"
     upsert_user(user_id, claims.get("email"))
+    record_security_event(
+        "login_success",
+        user_id,
+        PROVIDER_LABELS.get(provider, provider),
+        ip_address=_client_ip(request),
+        user_agent=_client_user_agent(request),
+    )
     return {"token": create_app_token(user_id)}
 
 
 @app.post("/auth/apple")
-def auth_apple(payload: AppleSignInRequest):
+def auth_apple(payload: AppleSignInRequest, request: Request):
     try:
         claims = verify_apple_identity_token(payload.identity_token)
-        return _issue_session_token("apple", claims)
+        return _issue_session_token("apple", claims, request)
     except AuthError as exc:
+        record_security_event(
+            "login_failed", "apple", str(exc), ip_address=_client_ip(request), user_agent=_client_user_agent(request)
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 @app.post("/auth/google")
-def auth_google(payload: GoogleSignInRequest):
+def auth_google(payload: GoogleSignInRequest, request: Request):
     try:
         claims = verify_google_id_token(payload.id_token)
-        return _issue_session_token("google", claims)
+        return _issue_session_token("google", claims, request)
     except AuthError as exc:
+        record_security_event(
+            "login_failed", "google", str(exc), ip_address=_client_ip(request), user_agent=_client_user_agent(request)
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
 @app.post("/auth/github")
-def auth_github(payload: GitHubSignInRequest):
+def auth_github(payload: GitHubSignInRequest, request: Request):
     try:
         claims = exchange_github_code_for_user(payload.code)
-        return _issue_session_token("github", claims)
+        return _issue_session_token("github", claims, request)
     except AuthError as exc:
+        record_security_event(
+            "login_failed", "github", str(exc), ip_address=_client_ip(request), user_agent=_client_user_agent(request)
+        )
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
@@ -701,6 +738,19 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
 
 
+def _require_mail_configured() -> None:
+    """本番でSMTP未設定のまま「送信しました」と嘘をつかないためのガード。
+
+    ローカル開発ではSMTP未設定でもログ出力にフォールバックして動作確認できるままにし、
+    本番(RENDER環境変数あり)でのみ、設定漏れを503で即座に気づけるようにする。
+    """
+    if IS_PRODUCTION and not is_mail_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="メール送信が設定されていません(SMTP_HOST/SMTP_USER/SMTP_PASSWORD未設定)。管理者に連絡してください。",
+        )
+
+
 @app.post("/auth/code/signup")
 def auth_code_signup(payload: CodeSignupRequest):
     """メールアドレスだけで新規アカウントを作り、ログイン用の乱数コードを発行する。
@@ -713,6 +763,7 @@ def auth_code_signup(payload: CodeSignupRequest):
         raise HTTPException(status_code=400, detail="有効なメールアドレスを入力してください")
 
     _enforce_code_auth_rate_limit(email)
+    _require_mail_configured()
 
     if get_code_login_by_email(email):
         raise HTTPException(
@@ -736,17 +787,19 @@ def auth_code_signup(payload: CodeSignupRequest):
 
 
 @app.post("/auth/code/login")
-def auth_code_login(payload: CodeLoginRequest):
+def auth_code_login(payload: CodeLoginRequest, request: Request):
     """ログインコードを検証する。MFAが有効なアカウントには、セッショントークンの代わりに
     短命の仮認証トークンを返し、/auth/mfa/verify で認証アプリのコードを確認してから発行する。"""
     email = _normalize_email(payload.email)
+    ip_address = _client_ip(request)
+    user_agent = _client_user_agent(request)
     _enforce_code_auth_rate_limit(email)
     _enforce_not_locked(email)
 
     record = get_code_login_by_email(email)
     if not record or not hmac.compare_digest(record["code_hash"], _hash_code(payload.code)):
         _register_login_failure(email)
-        record_security_event("login_failed", email, "ログインコード不一致")
+        record_security_event("login_failed", email, "ログインコード不一致", ip_address=ip_address, user_agent=user_agent)
         raise HTTPException(status_code=401, detail="メールアドレスまたはコードが正しくありません")
 
     user_id = record["user_id"]
@@ -754,18 +807,20 @@ def auth_code_login(payload: CodeLoginRequest):
         return {"mfa_required": True, "mfa_token": create_mfa_token(user_id)}
 
     _clear_login_failures(email)
-    record_security_event("login_success", user_id, "ログインコード")
+    record_security_event("login_success", user_id, "ログインコード", ip_address=ip_address, user_agent=user_agent)
     return {"token": create_app_token(user_id)}
 
 
 @app.post("/auth/mfa/verify")
-def auth_mfa_verify(payload: MfaVerifyRequest):
+def auth_mfa_verify(payload: MfaVerifyRequest, request: Request):
     """仮認証トークン+認証アプリの6桁コードで、本物のセッショントークンを発行する。"""
     try:
         user_id = decode_mfa_token(payload.mfa_token)
     except AuthError as exc:
         raise HTTPException(status_code=401, detail="認証の有効期限が切れました。最初からやり直してください。") from exc
 
+    ip_address = _client_ip(request)
+    user_agent = _client_user_agent(request)
     lock_key = get_user_email(user_id) or user_id
     _enforce_not_locked(lock_key)
 
@@ -775,11 +830,11 @@ def auth_mfa_verify(payload: MfaVerifyRequest):
 
     if not verify_mfa_code(enrollment["secret"], payload.code):
         _register_login_failure(lock_key)
-        record_security_event("mfa_failed", user_id, "認証アプリのコード不一致")
+        record_security_event("mfa_failed", user_id, "認証アプリのコード不一致", ip_address=ip_address, user_agent=user_agent)
         raise HTTPException(status_code=401, detail="認証アプリのコードが正しくありません")
 
     _clear_login_failures(lock_key)
-    record_security_event("login_success", user_id, "ログインコード+認証アプリ")
+    record_security_event("login_success", user_id, "ログインコード+認証アプリ", ip_address=ip_address, user_agent=user_agent)
     return {"token": create_app_token(user_id)}
 
 
@@ -791,6 +846,7 @@ def auth_code_reissue(payload: CodeReissueRequest):
     """
     email = _normalize_email(payload.email)
     _enforce_code_auth_rate_limit(email)
+    _require_mail_configured()
 
     record = get_code_login_by_email(email)
     if record:
@@ -1348,6 +1404,28 @@ def admin_overview(_admin_user_id: str = Depends(require_admin)):
     return get_admin_overview()
 
 
+ADMIN_LOGIN_LOG_PAGE_SIZE_MAX = 200
+
+
+@app.get("/admin/logins")
+def admin_logins(
+    limit: int = 50,
+    offset: int = 0,
+    event_type: Optional[str] = None,
+    q: Optional[str] = None,
+    _admin_user_id: str = Depends(require_admin),
+):
+    """運営者向け「ログイン履歴」。Apple/Google/GitHub/メールコードの全ログイン方式・
+    成功/失敗/ロック/MFA関連イベントを、日時降順でページングして返す。
+
+    qはsubject(user_id/メールアドレス)とdetailの部分一致で絞り込む。
+    """
+    limit = max(1, min(limit, ADMIN_LOGIN_LOG_PAGE_SIZE_MAX))
+    offset = max(0, offset)
+    items, total = list_login_events(limit=limit, offset=offset, event_type=event_type, q=q)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @app.post("/activity/ping")
 def activity_ping(user_id: str = Depends(get_current_user)):
     """ホーム画面の利用時間グラフ向けに、画面を開いている間の生存確認を1件記録する。
@@ -1500,5 +1578,4 @@ if __name__ == '__main__':
     # クラウド(Render等)のコンテナはホスト側から到達できるよう0.0.0.0で待ち受ける必要がある。
     host = "127.0.0.1" if desktop_mode else os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    is_render = bool(os.getenv("RENDER"))
-    uvicorn.run("app:app", host=host, port=port, reload=not desktop_mode and not is_render)
+    uvicorn.run("app:app", host=host, port=port, reload=not desktop_mode and not IS_PRODUCTION)

@@ -173,6 +173,8 @@ def init_db() -> None:
         _ensure_column(conn, "sessions", "user_id", "TEXT", backfill=LEGACY_USER_ID)
         _ensure_column(conn, "generations", "is_private", "INTEGER", backfill=0)
         _ensure_column(conn, "entitlements", "stripe_customer_id", "TEXT")
+        _ensure_column(conn, "security_events", "ip_address", "TEXT")
+        _ensure_column(conn, "security_events", "user_agent", "TEXT")
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, ?)",
             (LEGACY_USER_ID, datetime.now(timezone.utc).isoformat()),
@@ -695,12 +697,26 @@ def delete_mfa(user_id: str) -> bool:
         return cursor.rowcount > 0
 
 
-def record_security_event(event_type: str, subject: str, detail: str = "") -> None:
-    """ログイン失敗・ロック・MFA変更など、インシデント調査に必要な事象を記録する。"""
+def record_security_event(
+    event_type: str,
+    subject: str,
+    detail: str = "",
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
+    """ログイン失敗・ロック・MFA変更など、インシデント調査に必要な事象を記録する。
+
+    公開後はApple/Google/GitHub/メールコードの全ログイン方式で発生しうるため、
+    ip_address/user_agentも残し、後から「誰が・どこから・どの方式で」ログインしたか
+    追跡できるようにする。
+    """
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO security_events (created_at, event_type, subject, detail) VALUES (?, ?, ?, ?)",
-            (datetime.now(timezone.utc).isoformat(), event_type, subject, detail),
+            """
+            INSERT INTO security_events (created_at, event_type, subject, detail, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (datetime.now(timezone.utc).isoformat(), event_type, subject, detail, ip_address, user_agent),
         )
 
 
@@ -717,6 +733,58 @@ def list_security_events(subject: str, limit: int = 20) -> list[dict]:
             (subject, limit),
         ).fetchall()
     return [dict(row) for row in rows]
+
+
+_LOGIN_EVENT_TYPES = (
+    "login_success",
+    "login_failed",
+    "login_locked",
+    "mfa_failed",
+    "mfa_confirm_failed",
+    "mfa_disable_failed",
+    "mfa_enabled",
+    "mfa_disabled",
+)
+
+
+def list_login_events(
+    limit: int = 50,
+    offset: int = 0,
+    event_type: str | None = None,
+    q: str | None = None,
+) -> tuple[list[dict], int]:
+    """運営者向け管理ダッシュボードの「ログイン履歴」向けに、全ユーザー分の
+    ログイン関連イベントをページング・絞り込みして返す。(items, total件数)のタプル。
+    """
+    where = ["event_type IN ({})".format(",".join("?" for _ in _LOGIN_EVENT_TYPES))]
+    params: list = list(_LOGIN_EVENT_TYPES)
+
+    if event_type:
+        where.append("event_type = ?")
+        params.append(event_type)
+    if q:
+        where.append("(subject LIKE ? OR detail LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like])
+
+    where_sql = " AND ".join(where)
+
+    with _connect() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM security_events WHERE {where_sql}", params
+        ).fetchone()["n"]
+        rows = conn.execute(
+            f"""
+            SELECT id, created_at, event_type, subject, detail, ip_address, user_agent
+            FROM security_events
+            WHERE {where_sql}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [limit, offset],
+        ).fetchall()
+
+    return [dict(row) for row in rows], total
 
 
 # フロントは画面を開いている間、60秒おきに/activity/pingを叩く。この間隔より少し
