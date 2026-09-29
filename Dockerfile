@@ -3,6 +3,19 @@
 
 FROM node:24-slim AS frontend-build
 WORKDIR /app/frontend
+
+# VITE_*はビルド時にJSバンドルへ埋め込まれる値(すべて公開情報のOAuthクライアントID/URLで、
+# 秘密情報ではない)。RenderはダッシュボードのEnvironment Variablesを同名のDocker build
+# argsとして自動的に渡してくれるので、Renderの環境変数に設定するだけで反映される。
+ARG VITE_APPLE_CLIENT_ID
+ARG VITE_GOOGLE_CLIENT_ID
+ARG VITE_GITHUB_CLIENT_ID
+ARG VITE_GITHUB_REDIRECT_URI
+ENV VITE_APPLE_CLIENT_ID=$VITE_APPLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
+ENV VITE_GITHUB_CLIENT_ID=$VITE_GITHUB_CLIENT_ID
+ENV VITE_GITHUB_REDIRECT_URI=$VITE_GITHUB_REDIRECT_URI
+
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./

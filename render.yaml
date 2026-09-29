@@ -40,6 +40,14 @@ services:
         sync: false
       - key: GITHUB_CLIENT_SECRET
         sync: false
+      # フロントエンドのビルドに埋め込まれる値(公開情報。値はバックエンドの
+      # APPLE_CLIENT_ID/GOOGLE_CLIENT_ID/GITHUB_CLIENT_IDと同じものを入れる)。
+      - key: VITE_APPLE_CLIENT_ID
+        sync: false
+      - key: VITE_GOOGLE_CLIENT_ID
+        sync: false
+      - key: VITE_GITHUB_CLIENT_ID
+        sync: false
       - key: SMTP_HOST
         sync: false
       - key: SMTP_PORT
