@@ -32,6 +32,9 @@ GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs"
 GITHUB_TOKEN_URL = "https://github.com/login/oauth/access_token"
 GITHUB_USER_URL = "https://api.github.com/user"
 GITHUB_USER_EMAILS_URL = "https://api.github.com/user/emails"
+# common = 個人/組織どちらのMicrosoftアカウントでもログインできるマルチテナントエンドポイント。
+MICROSOFT_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+MICROSOFT_GRAPH_ME_URL = "https://graph.microsoft.com/v1.0/me"
 
 # Sign in with Apple のServices ID(または対象のBundle ID)。identity tokenの
 # audクレームと一致することを要求する。Apple Developer Program登録後に取得する。
@@ -44,9 +47,24 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "").strip()
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "").strip()
 GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "").strip()
 
-# アプリ独自セッションJWTの署名鍵。本番では必ず長いランダム値を設定すること。
+# Microsoft(Azure ADアプリ登録)の Client ID / Secret。Azure Portal → 「アプリの登録」で
+# 作成する(登録自体は無料。Apple Developer Programのような有料登録は不要)。
+MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "").strip()
+MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "").strip()
+
+# アプリ独自セッションJWTの署名鍵。本番では必ず長いランダム値を設定すること
+# (`python -c "import secrets; print(secrets.token_hex(32))"` 等で生成)。
 JWT_SECRET = os.getenv("JWT_SECRET", "").strip()
 APP_TOKEN_TTL = timedelta(days=30)
+
+# HS256は総当たり攻撃への耐性が鍵の長さに直結するため、設定されている場合は
+# 最低長を強制する(短すぎる鍵のまま気づかず本番稼働することを防ぐ、起動時フェイルファスト)。
+_MIN_JWT_SECRET_LENGTH = 32
+if JWT_SECRET and len(JWT_SECRET) < _MIN_JWT_SECRET_LENGTH:
+    raise RuntimeError(
+        f"JWT_SECRET は最低{_MIN_JWT_SECRET_LENGTH}文字必要です(現在{len(JWT_SECRET)}文字)。"
+        "総当たり攻撃に耐えられる、十分に長いランダム値を設定してください。"
+    )
 
 # MFA(認証アプリのコード)入力待ちの間だけ有効な、短命の「仮認証」トークンの有効期限。
 MFA_TOKEN_TTL = timedelta(minutes=5)
@@ -163,6 +181,53 @@ def exchange_github_code_for_user(code: str) -> dict:
         raise AuthError("GitHub profile response is missing 'id'")
 
     return {"sub": str(github_user_id), "email": email}
+
+
+def exchange_microsoft_code_for_user(code: str, redirect_uri: str) -> dict:
+    """MicrosoftのOAuth2認可コードをアクセストークンに交換し、Graph APIでプロフィールを取得する。
+
+    GitHubと同じ通常のOAuth2(認可コード)フローだが、Microsoftはトークン交換時に
+    認可リクエストで使ったredirect_uriと完全一致する値を要求するため、引数で受け取る。
+    """
+    if not MICROSOFT_CLIENT_ID or not MICROSOFT_CLIENT_SECRET:
+        raise AuthError("MICROSOFT_CLIENT_ID/MICROSOFT_CLIENT_SECRET is not configured on the server")
+
+    try:
+        token_resp = requests.post(
+            MICROSOFT_TOKEN_URL,
+            data={
+                "client_id": MICROSOFT_CLIENT_ID,
+                "client_secret": MICROSOFT_CLIENT_SECRET,
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+                "scope": "openid profile email User.Read",
+            },
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
+        token_resp.raise_for_status()
+        token_data = token_resp.json()
+        access_token = token_data.get("access_token")
+        if not access_token:
+            raise AuthError(f"Microsoft did not return an access token: {token_data}")
+
+        user_resp = requests.get(
+            MICROSOFT_GRAPH_ME_URL,
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/json"},
+            timeout=10,
+        )
+        user_resp.raise_for_status()
+        user_data = user_resp.json()
+    except requests.RequestException as exc:
+        raise AuthError(f"Microsoft sign-in failed: {exc}") from exc
+
+    microsoft_user_id = user_data.get("id")
+    if not microsoft_user_id:
+        raise AuthError("Microsoft profile response is missing 'id'")
+
+    email = user_data.get("mail") or user_data.get("userPrincipalName")
+    return {"sub": microsoft_user_id, "email": email}
 
 
 def create_app_token(user_id: str) -> str:

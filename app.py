@@ -10,16 +10,17 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import quote
 
 from contextlib import asynccontextmanager
 
+import crypto_utils
 import stripe
 from docx import Document
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
 from fastapi.responses import RedirectResponse
@@ -32,6 +33,7 @@ from auth import (
     decode_app_token,
     decode_mfa_token,
     exchange_github_code_for_user,
+    exchange_microsoft_code_for_user,
     verify_apple_identity_token,
     verify_google_id_token,
 )
@@ -134,6 +136,26 @@ async def _lifespan(_app: FastAPI):
         reminder_task.cancel()
 
 
+# フロントエンド(frontend/index.html)が実際に読み込む外部オリジンだけを許可する
+# Content-Security-Policy。トークンはlocalStorageに保存しているため、万一XSSが
+# 混入しても任意ドメインへの持ち出し(exfiltration)やインラインスクリプト実行を
+# CSPで塞ぐのが狙い。新たに外部スクリプト/APIを追加した場合はここも更新すること。
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self' https://appleid.cdn-apple.com https://accounts.google.com",
+    # Viteのビルド出力に含まれる<style>タグ(起動演出)のためstyle-srcのみ'unsafe-inline'を許容する。
+    # スクリプトの実行はscript-srcで厳格に絞っているため、XSSの主な入口はここでは塞がれたまま。
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "img-src 'self' data:",
+    "connect-src 'self' https://appleid.apple.com https://accounts.google.com",
+    "frame-src https://accounts.google.com https://appleid.apple.com",
+    "frame-ancestors 'self'",
+    "base-uri 'none'",
+    "form-action 'self'",
+])
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """通信の保護: FORCE_HTTPS時はHTTPをHTTPSへリダイレクトしHSTSを付与する。
     あわせて基本的なセキュリティヘッダーを全レスポンスに付ける。"""
@@ -149,8 +171,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
         if FORCE_HTTPS:
-            response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+            # preload: HSTS事前読み込みリスト(hstspreload.org)への登録を見据えて付与する。
+            # ヘッダーを送るだけでは自動登録されない(登録には別途申請が必要)ため、
+            # 現時点では「登録した場合に備えて矛盾のない設定にしておく」意味合い。
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload"
+            )
         return response
 
 
@@ -167,6 +195,20 @@ MAX_EXCERPT_CHARS = 4000
 # /study-notes は分析対象そのものが資料本文なので、参考資料としての抜粋(MAX_EXCERPT_CHARS)より
 # 大きく取る。
 STUDY_NOTES_MAX_CHARS = 20000
+
+# アップロードファイル1件あたりの上限サイズ。無制限だとメモリ枯渇や
+# Claude APIへの巨大プロンプト送信(コスト暴走)につながるため、抜粋に使う分量
+# よりかなり大きめだが有限の上限を設ける。
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "20")) * 1024 * 1024
+
+# 以下、Claude APIに渡すリクエストの分量に上限を設ける定数。無制限だと
+# 1リクエストでの巨大プロンプト送信(コスト暴走・メモリ圧迫)を許してしまう。
+MAX_DESCRIPTION_LENGTH = 4000
+MAX_COURSE_CHAT_MESSAGES = 60
+MAX_PAPER_BODY_SECTIONS = 30
+MAX_TRANSLATE_TITLES = 50
+MAX_TOPIC_LENGTH = 2000
+MAX_STUDY_NOTES_FOCUS_LENGTH = 500
 
 # 初回プロンプト送信時に確認する分量(文字数)の選択肢。
 LENGTH_OPTIONS = [
@@ -209,6 +251,16 @@ FORCE_HTTPS = os.getenv("FORCE_HTTPS", "").strip() in ("1", "true", "yes")
 # Renderは全サービスにRENDER=trueを自動設定する。ローカル開発(SMTP未設定でログ出力に
 # フォールバックする)と本番(メール送信が必須)を区別するために使う。
 IS_PRODUCTION = bool(os.getenv("RENDER"))
+
+# 保存データの暗号化(AES-256-GCM、crypto_utils参照)は本番では必須にする。
+# DATA_ENCRYPTION_KEY未設定のまま気づかず本番稼働し、生成内容やMFAシークレットが
+# 平文でSQLiteに保存され続ける事態を防ぐための起動時フェイルファスト。
+if IS_PRODUCTION and not crypto_utils.is_configured():
+    raise RuntimeError(
+        "本番環境ではDATA_ENCRYPTION_KEY(保存データのAES-256-GCM暗号化鍵)の設定が必須です。"
+        "python -c \"from crypto_utils import generate_key; print(generate_key())\" で生成し、"
+        "Renderの環境変数に設定してください。"
+    )
 
 # /course-chat 1件あたりClaude APIを呼ぶため、/generateと同様にユーザーごとの
 # 1分あたりの上限リクエスト数でコスト暴走を防ぐ。0以下で無効化。
@@ -309,8 +361,12 @@ def get_current_user(
 
     DEV_BYPASS_USER_ID が設定されている開発環境に限り、X-Dev-User-Id ヘッダーで
     Sign in with Appleを経ずにuser_idを直接指定できる(ローカルでの動作確認用)。
+
+    IS_PRODUCTION(Render上での実行)の場合は、DEV_BYPASS_USER_IDが誤って
+    設定されていてもこのバイパスを無効化する(任意のuser_idへのなりすましを
+    許してしまうため、環境変数の設定ミス1つで本番が突破される事態を防ぐ)。
     """
-    if DEV_BYPASS_USER_ID and x_dev_user_id:
+    if DEV_BYPASS_USER_ID and x_dev_user_id and not IS_PRODUCTION:
         return x_dev_user_id
 
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -439,26 +495,35 @@ class GitHubSignInRequest(BaseModel):
     code: str
 
 
+class MicrosoftSignInRequest(BaseModel):
+    code: str
+    redirect_uri: str
+
+
+# 以下、Fieldのmax_lengthは「壊れた入力を拒否する」ためではなく、無制限の巨大な
+# リクエストボディでメモリ・Claude APIコストを消費させる攻撃(DoS/コスト暴走)を
+# 防ぐための上限。実際の利用で必要な長さより十分大きく取ってある。
+
 class CodeSignupRequest(BaseModel):
-    email: str
+    email: str = Field(max_length=254)  # RFC 5321の最大長
 
 
 class CodeLoginRequest(BaseModel):
-    email: str
-    code: str
+    email: str = Field(max_length=254)
+    code: str = Field(max_length=64)
 
 
 class CodeReissueRequest(BaseModel):
-    email: str
+    email: str = Field(max_length=254)
 
 
 class MfaCodeRequest(BaseModel):
-    code: str
+    code: str = Field(max_length=32)
 
 
 class MfaVerifyRequest(BaseModel):
-    mfa_token: str
-    code: str
+    mfa_token: str = Field(max_length=4000)
+    code: str = Field(max_length=32)
 
 
 class PrivacyUpdate(BaseModel):
@@ -479,32 +544,32 @@ class SessionUpdate(BaseModel):
 
 
 class CourseChatMessage(BaseModel):
-    role: str
-    content: str
+    role: str = Field(max_length=20)
+    content: str = Field(max_length=8000)
 
 
 class CourseChatRequest(BaseModel):
-    university: str
-    faculty: str
-    department: str = ""
-    messages: List[CourseChatMessage]
+    university: str = Field(max_length=200)
+    faculty: str = Field(max_length=200)
+    department: str = Field(default="", max_length=200)
+    messages: List[CourseChatMessage] = Field(max_length=MAX_COURSE_CHAT_MESSAGES)
     history_id: Optional[int] = None
 
 
 class PaperBodyRequest(BaseModel):
-    title: str
-    research_question: str = ""
-    sections: List[Dict[str, Any]]
+    title: str = Field(max_length=300)
+    research_question: str = Field(default="", max_length=2000)
+    sections: List[Dict[str, Any]] = Field(max_length=MAX_PAPER_BODY_SECTIONS)
     target_length: str = ""
 
 
 class TranslateTitlesRequest(BaseModel):
-    titles: List[str]
+    titles: List[Annotated[str, Field(max_length=1000)]] = Field(max_length=MAX_TRANSLATE_TITLES)
     target_lang: str
 
 
 class TaskCreateRequest(BaseModel):
-    description: str
+    description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
     deadline: Optional[str] = None  # ISO8601文字列(任意)
 
 
@@ -513,7 +578,7 @@ class TaskStatusUpdate(BaseModel):
 
 
 class TaskGeneratorRequest(BaseModel):
-    description: str
+    description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
     kind: str = "text"  # "text" | "excel"
 
 
@@ -529,6 +594,30 @@ def _extract_docx_text(raw: bytes) -> str:
     return "\n".join(paragraphs).strip()
 
 
+async def _read_upload_within_limit(upload: UploadFile) -> bytes:
+    """アップロードファイルをMAX_UPLOAD_BYTESまでのサイズ上限付きで読み込む。
+
+    UploadFile.read()に上限がないため、無制限だとメモリ枯渇やClaude APIへの
+    巨大プロンプト送信(コスト暴走)につながる。チャンク単位で読み、上限を
+    超えた時点で即座に413を返す(全部読み切ってからチェックすると、その
+    「全部読む」こと自体がメモリを圧迫してしまうため)。
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"ファイルサイズが上限({MAX_UPLOAD_BYTES // (1024 * 1024)}MB)を超えています",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 async def _describe_upload(upload: UploadFile) -> str:
     """アップロードされたファイルを Claude のプロンプトに含める形式のテキストにする。
 
@@ -537,7 +626,7 @@ async def _describe_upload(upload: UploadFile) -> str:
     """
     filename = upload.filename or "(無題ファイル)"
     ext = os.path.splitext(filename)[1].lower()
-    raw = await upload.read()
+    raw = await _read_upload_within_limit(upload)
 
     if ext in TEXT_FILE_EXTENSIONS:
         try:
@@ -575,7 +664,7 @@ async def _extract_study_notes_file_text(upload: UploadFile) -> str:
     """
     filename = upload.filename or "(無題ファイル)"
     ext = os.path.splitext(filename)[1].lower()
-    raw = await upload.read()
+    raw = await _read_upload_within_limit(upload)
 
     if ext in TEXT_FILE_EXTENSIONS:
         try:
@@ -660,16 +749,26 @@ def _client_user_agent(request: Request) -> str:
     return request.headers.get("user-agent", "")[:300]
 
 
-PROVIDER_LABELS = {"apple": "Apple", "google": "Google", "github": "GitHub"}
+PROVIDER_LABELS = {"apple": "Apple", "google": "Google", "github": "GitHub", "microsoft": "Microsoft"}
 
 
 def _issue_session_token(provider: str, claims: dict, request: Request) -> dict:
     """検証済みclaimsから内部user_id(provider:sub)を組み立て、セッショントークンを発行する。
 
     プロバイダーが違えば同じ人でも別アカウント扱いになる(自動アカウント統合はしない)。
+
+    このアカウントでMFA(認証アプリ)が有効な場合は、Apple/Google/GitHubでの
+    認証だけでは即座にセッションを発行せず、/auth/code/loginと同様に短命の
+    仮認証トークンを返す(/auth/mfa/verifyで6桁コードを確認してから本発行する)。
+    これが無いと、ログインコード方式にだけMFAが効いてOAuth方式では素通りできて
+    しまい、MFAを有効化した意味がなくなる。
     """
     user_id = f"{provider}:{claims['sub']}"
     upsert_user(user_id, claims.get("email"))
+
+    if is_mfa_enabled(user_id):
+        return {"mfa_required": True, "mfa_token": create_mfa_token(user_id)}
+
     record_security_event(
         "login_success",
         user_id,
@@ -716,11 +815,24 @@ def auth_github(payload: GitHubSignInRequest, request: Request):
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+@app.post("/auth/microsoft")
+def auth_microsoft(payload: MicrosoftSignInRequest, request: Request):
+    try:
+        claims = exchange_microsoft_code_for_user(payload.code, payload.redirect_uri)
+        return _issue_session_token("microsoft", claims, request)
+    except AuthError as exc:
+        record_security_event(
+            "login_failed", "microsoft", str(exc), ip_address=_client_ip(request), user_agent=_client_user_agent(request)
+        )
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
 @app.post("/auth/dev")
 def auth_dev():
     """開発用: DEV_BYPASS_USER_ID設定時のみ、ブラウザのログイン画面からワンクリックで
-    その固定ユーザーとしてのトークンを取得できる(本番では404)。"""
-    if not DEV_BYPASS_USER_ID:
+    その固定ユーザーとしてのトークンを取得できる(本番(IS_PRODUCTION)では
+    設定ミスがあっても常に404にする)。"""
+    if not DEV_BYPASS_USER_ID or IS_PRODUCTION:
         raise HTTPException(status_code=404, detail="not found")
     return {"token": create_app_token(DEV_BYPASS_USER_ID)}
 
@@ -757,6 +869,13 @@ def auth_code_signup(payload: CodeSignupRequest):
 
     コードはメール(SMTP未設定時はログ出力)でのみ届け、APIレスポンスには含めない。
     画面や通信ログにコードが残らないようにするため。
+
+    重要: この時点ではまだセッショントークンを発行しない。発行してしまうと、
+    メールを受信できない攻撃者が「他人のメールアドレス」を指定して叩くだけで
+    (相手はまだ会員登録していない前提)、コードを一切知らずにそのメールアドレス
+    宛のアカウントへ即ログインできてしまう(なりすまし)。実際にコードが
+    メールボックスに届いたことを本人が確認できて初めて、/auth/code/login で
+    トークンを発行する。
     """
     email = _normalize_email(payload.email)
     if "@" not in email or len(email) < 3:
@@ -783,7 +902,7 @@ def auth_code_signup(payload: CodeSignupRequest):
         "このコードはログインに必要です。他人に教えず、紙などに控えて安全に保管してください。",
     )
 
-    return {"token": create_app_token(user_id)}
+    return {"message": "ログインコードをメールで送信しました。届いたコードでログインしてください。"}
 
 
 @app.post("/auth/code/login")
@@ -813,7 +932,11 @@ def auth_code_login(payload: CodeLoginRequest, request: Request):
 
 @app.post("/auth/mfa/verify")
 def auth_mfa_verify(payload: MfaVerifyRequest, request: Request):
-    """仮認証トークン+認証アプリの6桁コードで、本物のセッショントークンを発行する。"""
+    """仮認証トークン+認証アプリの6桁コードで、本物のセッショントークンを発行する。
+
+    一次認証(メール+ログインコード、またはApple/Google/GitHub)がMFA必須の
+    アカウントで成功した後、共通してここに合流する。
+    """
     try:
         user_id = decode_mfa_token(payload.mfa_token)
     except AuthError as exc:
@@ -834,7 +957,10 @@ def auth_mfa_verify(payload: MfaVerifyRequest, request: Request):
         raise HTTPException(status_code=401, detail="認証アプリのコードが正しくありません")
 
     _clear_login_failures(lock_key)
-    record_security_event("login_success", user_id, "ログインコード+認証アプリ", ip_address=ip_address, user_agent=user_agent)
+    first_factor = PROVIDER_LABELS.get(user_id.split(":", 1)[0], "ログインコード")
+    record_security_event(
+        "login_success", user_id, f"{first_factor}+認証アプリ", ip_address=ip_address, user_agent=user_agent
+    )
     return {"token": create_app_token(user_id)}
 
 
@@ -876,6 +1002,8 @@ async def generate(
 
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
+    if len(topic) > MAX_TOPIC_LENGTH:
+        raise HTTPException(status_code=400, detail=f"topicは{MAX_TOPIC_LENGTH}文字以内で入力してください")
 
     entitlement = get_or_create_entitlement(user_id)
     quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
@@ -1205,6 +1333,11 @@ async def study_notes(
     全体の流れ・復習用の質問を整理して返す。
     """
     _enforce_study_notes_rate_limit(user_id)
+
+    if len(focus) > MAX_STUDY_NOTES_FOCUS_LENGTH:
+        raise HTTPException(
+            status_code=400, detail=f"focusは{MAX_STUDY_NOTES_FOCUS_LENGTH}文字以内で入力してください"
+        )
 
     document_text = text.strip()
     if file and file.filename:
@@ -1571,6 +1704,8 @@ if os.path.isdir(_FRONTEND_DIST_DIR):
 
 
 if __name__ == '__main__':
+    import ssl
+
     import uvicorn
 
     desktop_mode = os.getenv("DESKTOP_MODE", "").strip().lower() in {"1", "true", "yes"}
@@ -1578,4 +1713,22 @@ if __name__ == '__main__':
     # クラウド(Render等)のコンテナはホスト側から到達できるよう0.0.0.0で待ち受ける必要がある。
     host = "127.0.0.1" if desktop_mode else os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("app:app", host=host, port=port, reload=not desktop_mode and not IS_PRODUCTION)
+
+    # Render等のPaaSではエッジ(ロードバランサー)がTLSを終端し、コンテナへは平文HTTPで
+    # 転送されるのが通常の構成であり、それ自体は脆弱性ではない(施設内のプライベート
+    # ネットワークを経由する)。一方、Renderを介さずこのアプリを直接インターネットに
+    # 公開する場合(自前サーバー等)に備えて、SSL_CERTFILE/SSL_KEYFILEが設定されていれば
+    # uvicorn自身がTLS 1.2未満(SSLv3/TLSv1.0/TLSv1.1)を拒否するサーバーとして
+    # 起動できるようにしておく(SECURITY.md「暗号化仕様」参照)。
+    ssl_certfile = os.getenv("SSL_CERTFILE", "").strip() or None
+    ssl_keyfile = os.getenv("SSL_KEYFILE", "").strip() or None
+
+    if ssl_certfile:
+        config = uvicorn.Config(
+            "app:app", host=host, port=port, ssl_certfile=ssl_certfile, ssl_keyfile=ssl_keyfile
+        )
+        config.load()
+        config.ssl.minimum_version = ssl.TLSVersion.TLSv1_2  # TLS 1.2未満を拒否
+        uvicorn.Server(config).run()
+    else:
+        uvicorn.run("app:app", host=host, port=port, reload=not desktop_mode and not IS_PRODUCTION)

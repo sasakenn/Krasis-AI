@@ -19,7 +19,12 @@ def _extract_code_from_message(message_body: str) -> str:
 
 
 def _signup(email: str) -> tuple[dict, str]:
-    """テスト用: サインアップし、(レスポンスJSON, メールで送られたコード)を返す。"""
+    """テスト用: サインアップし、(レスポンスJSON, メールで送られたコード)を返す。
+
+    コードの持ち主であることを確認する前にセッションを発行しないよう、
+    サインアップ単体ではトークンを返さない仕様(下記test_signup_does_not_issue_a_token_before_code_verification
+    参照)。トークンが必要なテストは_signup_and_loginを使う。
+    """
     with patch("app.send_email") as mock_send_email:
         resp = client.post("/auth/code/signup", json={"email": email})
     assert resp.status_code == 200
@@ -27,13 +32,28 @@ def _signup(email: str) -> tuple[dict, str]:
     return resp.json(), _extract_code_from_message(message_body)
 
 
-def test_signup_creates_account_and_emails_a_login_code():
+def _signup_and_login(email: str) -> tuple[dict, str]:
+    """テスト用: サインアップ後、メールで届いたコードで実際にログインまで行い、
+    (ログインレスポンスJSON, コード)を返す。MFA未設定のアカウント向け。
+    """
+    _, code = _signup(email)
+    resp = client.post("/auth/code/login", json={"email": email, "code": code})
+    assert resp.status_code == 200
+    assert resp.json()["token"]
+    return resp.json(), code
+
+
+def test_signup_does_not_issue_a_token_before_code_verification():
+    """サインアップ直後(コードをまだ誰も入力していない段階)ではセッショントークンを
+    発行しない。他人のメールアドレスでサインアップするだけでそのアカウントに
+    ログインできてしまう脆弱性の回帰テスト。
+    """
     with patch("app.send_email") as mock_send_email:
         resp = client.post("/auth/code/signup", json={"email": "new-user@example.com"})
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["token"]
+    assert "token" not in body
     assert "code" not in body  # コードは画面にもAPIレスポンスにも出さず、メールでのみ届ける
 
     mock_send_email.assert_called_once()
@@ -43,8 +63,13 @@ def test_signup_creates_account_and_emails_a_login_code():
     assert len(code) == 12
     int(code, 16)  # 16進数として解釈できる(=乱数コードの形式)
 
-    # 発行されたトークンでAPIが叩けること
-    resp2 = client.get("/history", headers={"Authorization": f"Bearer {body['token']}", "X-Dev-User-Id": ""})
+    # コードを正しく入力して初めてトークンが発行される
+    login = client.post("/auth/code/login", json={"email": "new-user@example.com", "code": code})
+    assert login.status_code == 200
+    token = login.json()["token"]
+    assert token
+
+    resp2 = client.get("/history", headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""})
     assert resp2.status_code == 200
 
 

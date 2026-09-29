@@ -156,6 +156,18 @@ def test_generate_passes_reference_and_format_notes_and_length_to_prompt():
     assert captured["target_length"] == "3001-5000"
 
 
+def test_generate_rejects_oversized_reference_file(monkeypatch):
+    """無制限のアップロードによるメモリ枯渇・コスト暴走を防ぐサイズ上限の回帰テスト。"""
+    monkeypatch.setattr(app_module, "MAX_UPLOAD_BYTES", 10)  # 10バイトという小さい上限にして再現する
+
+    resp = client.post(
+        "/generate",
+        data={"topic": "生成AIと教育", "target_length": "1-100"},
+        files={"reference_files": ("notes.txt", b"this file is definitely larger than ten bytes", "text/plain")},
+    )
+    assert resp.status_code == 413
+
+
 def test_generate_notes_unsupported_files_by_name_only():
     captured = {}
 
@@ -390,6 +402,19 @@ def test_endpoints_require_auth_when_dev_bypass_disabled(monkeypatch):
     )
 
 
+def test_dev_bypass_is_hard_disabled_in_production_even_if_misconfigured(monkeypatch):
+    """DEV_BYPASS_USER_IDが本番(IS_PRODUCTION)環境に誤って設定されていても、
+    X-Dev-User-Idヘッダーでのなりすましと/auth/devの両方を必ず塞ぐ回帰テスト。"""
+    monkeypatch.setattr(app_module, "DEV_BYPASS_USER_ID", "someone")
+    monkeypatch.setattr(app_module, "IS_PRODUCTION", True)
+
+    resp = client.get("/history", headers={"X-Dev-User-Id": "someone"})
+    assert resp.status_code == 401
+
+    dev_login = client.post("/auth/dev")
+    assert dev_login.status_code == 404
+
+
 def test_missing_bearer_token_is_rejected():
     resp = client.get(
         "/history", headers={"Authorization": "not-a-bearer-token", "X-Dev-User-Id": ""}
@@ -478,6 +503,33 @@ def test_github_sign_in_rejects_invalid_code(monkeypatch):
     assert resp.status_code == 401
 
 
+def test_microsoft_sign_in_issues_bearer_token_that_grants_access(monkeypatch):
+    monkeypatch.setattr(
+        app_module,
+        "exchange_microsoft_code_for_user",
+        lambda code, redirect_uri: {"sub": "ms-1", "email": "user@example.com"},
+    )
+
+    signin_resp = client.post("/auth/microsoft", json={"code": "the-code", "redirect_uri": "https://app.example.com"})
+    assert signin_resp.status_code == 200
+    token = signin_resp.json()["token"]
+
+    resp = client.get("/history", headers={"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""})
+    assert resp.status_code == 200
+
+
+def test_microsoft_sign_in_rejects_invalid_code(monkeypatch):
+    from auth import AuthError
+
+    def _raise(_code, _redirect_uri):
+        raise AuthError("boom")
+
+    monkeypatch.setattr(app_module, "exchange_microsoft_code_for_user", _raise)
+
+    resp = client.post("/auth/microsoft", json={"code": "bad-code", "redirect_uri": "https://app.example.com"})
+    assert resp.status_code == 401
+
+
 def test_different_providers_create_separate_accounts(monkeypatch):
     """同じsubでもプロバイダーが違えば別アカウントになる(自動アカウント統合はしない)。"""
     monkeypatch.setattr(
@@ -557,6 +609,49 @@ def test_admin_overview_returns_aggregate_stats_for_admin_user():
     assert "tokens_used_this_period" in body["usage"]
     assert set(body["generations"].keys()) == {"total", "last_7d", "last_30d"}
     assert isinstance(body["recent_security_events"], list)
+
+
+def test_admin_logins_rejects_non_admin_user():
+    resp = client.get("/admin/logins", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert resp.status_code == 403
+
+
+def test_admin_logins_records_and_lists_login_success_across_providers():
+    import db
+
+    db.record_security_event("login_success", "google:admin-logins-test-user", "Google", ip_address="203.0.113.5", user_agent="pytest-agent")
+
+    resp = client.get("/admin/logins", params={"q": "admin-logins-test-user"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] >= 1
+    item = next(i for i in body["items"] if i["subject"] == "google:admin-logins-test-user")
+    assert item["event_type"] == "login_success"
+    assert item["ip_address"] == "203.0.113.5"
+    assert item["user_agent"] == "pytest-agent"
+
+
+def test_admin_logins_filters_by_event_type():
+    import db
+
+    db.record_security_event("login_failed", "filter-test-subject", "コード不一致")
+    db.record_security_event("login_success", "filter-test-subject", "ログインコード")
+
+    resp = client.get("/admin/logins", params={"q": "filter-test-subject", "event_type": "login_failed"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    assert all(i["event_type"] == "login_failed" for i in items)
+
+
+def test_oauth_login_failure_is_recorded_as_security_event():
+    import db
+
+    resp = client.post("/auth/google", json={"id_token": "not-a-real-token"})
+    assert resp.status_code == 401
+
+    logins = client.get("/admin/logins", params={"event_type": "login_failed", "q": "google"})
+    assert logins.json()["total"] >= 1
 
 
 def test_generate_blocked_with_402_when_quota_exceeded(monkeypatch):

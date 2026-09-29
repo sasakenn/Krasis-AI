@@ -23,17 +23,46 @@ Paper Assistant のセキュリティ対策の実装箇所と、運用手順(イ
 外部サービスの管理アカウント(Stripe / SendGrid / Cloudflare / Xserver / GitHub / Anthropic Console)は、
 それぞれの管理画面で**必ず二要素認証を有効化**する。これはコードでは強制できないので、下記「教育・体制」のチェックリストで確認する。
 
-## 2. データ管理(暗号化)
+## 2. データ管理(暗号化仕様)
 
-| 対策 | 実装箇所 |
+### 2-1. 保存時の暗号化(encryption at rest): AES-256
+
+生成内容(`generations.outline_json`, `history_entries.payload_json`)とMFAシークレット
+(`mfa_enrollments.secret`)は、**AES-256-GCM**(256bit鍵・認証付き暗号)でアプリ層暗号化して
+SQLiteに保存する。
+
+| 項目 | 内容 |
 |---|---|
-| 通信の暗号化: `FORCE_HTTPS=1` でHTTP→HTTPSリダイレクトと `Strict-Transport-Security` を付与 | `app.py` `SecurityHeadersMiddleware` |
-| セキュリティヘッダー(`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`)を全レスポンスに付与 | 同上 |
-| 保存データの暗号化: 生成内容(`generations.outline_json`)とMFAシークレットを Fernet(AES-128-CBC + HMAC)で暗号化 | `crypto_utils.py`, `db.py` |
-| カード情報は保存・処理・通過させない(Stripe Checkoutへのリダイレクト方式) | `app.py` `/billing/*` |
+| アルゴリズム | AES-256-GCM(`cryptography.hazmat.primitives.ciphers.aead.AESGCM`) |
+| 鍵長 | 256bit(32バイト、base64エンコードして`DATA_ENCRYPTION_KEY`に設定) |
+| ノンス | リクエストごとに`os.urandom(12)`で生成(96bit、値の再利用なし) |
+| 実装 | `crypto_utils.py`(`encrypt_text`/`decrypt_text`)、呼び出し箇所は`db.py` |
+| 鍵生成 | `python -c "from crypto_utils import generate_key; print(generate_key())"` |
+| 本番での必須化 | `DATA_ENCRYPTION_KEY`未設定のまま`RENDER`環境(本番)で起動すると`app.py`が起動時エラーで止まる(平文保存のまま気づかず稼働することを防ぐフェイルファスト) |
 
-`DATA_ENCRYPTION_KEY` 未設定の場合は平文で保存される(起動時に警告)。**本番では必ず設定する。**
-鍵を後から設定しても、それ以前の平文行はそのまま読める(暗号化済みの値には `enc:v1:` 接頭辞が付く)。
+**過去の実装(2026年9月時点で移行済み)**: 旧バージョンはFernet(AES-128-CBC + HMAC-SHA256)を
+使っていた(`enc:v1:`接頭辞)。同じ`DATA_ENCRYPTION_KEY`の鍵材料でAES-256-GCMとしても解釈できる
+ため、鍵のローテーションなしで新方式(`enc:v2:`接頭辞)に切り替えている。`enc:v1:`で保存済みの
+行は引き続き同じ鍵で復号できる(後方互換)。`DATA_ENCRYPTION_KEY`を後から設定・変更した場合、
+既存の平文行や旧鍵で暗号化された行は自動では移行されないため、
+`./venv/bin/python scripts/reencrypt_existing_data.py` を一度実行して現在の鍵で暗号化し直す。
+
+`DATA_ENCRYPTION_KEY` 未設定の場合(ローカル開発など本番以外)は平文で保存される(起動時に警告)。
+
+### 2-2. 通信時の暗号化(encryption in transit): TLS 1.2以上
+
+| 項目 | 内容 |
+|---|---|
+| 最低バージョン | TLS 1.2以上のみ許可(SSLv2/SSLv3/TLS 1.0/TLS 1.1は不可) |
+| 本番(Render) | Renderのエッジ(ロードバランサー)がTLSを終端し、プラットフォーム側でTLS 1.2以上を強制する。エッジ〜コンテナ間はRenderのプライベートネットワーク内の通信となる |
+| `FORCE_HTTPS=1` | HTTP→HTTPSへ308リダイレクトし、`Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` を全レスポンスに付与(`app.py` `SecurityHeadersMiddleware`) |
+| Renderを介さない自前ホスティングの場合 | `SSL_CERTFILE`/`SSL_KEYFILE`を設定すると、uvicorn自身が`ssl.TLSVersion.TLSv1_2`を最低バージョンとして起動する(`app.py`の`__main__`ブロック参照)。TLS 1.2未満のクライアントはハンドシェイクの時点で拒否される |
+| セキュリティヘッダー | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Content-Security-Policy` を全レスポンスに付与(`app.py` `SecurityHeadersMiddleware`) |
+
+### 2-3. その他
+
+- カード情報は保存・処理・通過させない(Stripe Checkoutへのリダイレクト方式、`app.py` `/billing/*`)。
+- ログインコードはSHA-256ハッシュのみを保存し、鍵材料としては使わない(2-1のAES-256暗号化とは別)。
 
 ## 3. 脆弱性管理
 

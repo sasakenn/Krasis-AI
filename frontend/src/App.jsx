@@ -328,11 +328,13 @@ function LengthQuestion({ question, onChoose }) {
   )
 }
 
-function LoginScreen({ onToken }) {
+function LoginScreen({ onToken, initialMfaToken }) {
   const appleClientId = import.meta.env.VITE_APPLE_CLIENT_ID
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
   const githubRedirectUri = import.meta.env.VITE_GITHUB_REDIRECT_URI || window.location.origin
+  const microsoftClientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
+  const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
 
   const [error, setError] = useState(null)
   const [devLoading, setDevLoading] = useState(false)
@@ -343,18 +345,24 @@ function LoginScreen({ onToken }) {
   const [codeEmail, setCodeEmail] = useState('')
   const [codeInput, setCodeInput] = useState('')
   const [codeLoading, setCodeLoading] = useState(false)
-  const [reissueMessage, setReissueMessage] = useState(null)
+  const [codeAuthNotice, setCodeAuthNotice] = useState(null)
 
-  // 多要素認証(認証アプリ)が有効なアカウントの場合、ログインコード確認後に
-  // このmfaTokenを使って6桁コードの入力を求める(セッショントークンはまだ発行されない)。
-  const [mfaToken, setMfaToken] = useState(null)
+  // 多要素認証(認証アプリ)が有効なアカウントの場合、一次認証(ログインコード、
+  // またはApple/Google/GitHub)の後にこのmfaTokenを使って6桁コードの入力を求める
+  // (セッショントークンはまだ発行されない)。GitHubは画面遷移を伴うリダイレクト
+  // フローなので、親コンポーネント側で交換した結果をinitialMfaTokenで受け取る。
+  const [mfaToken, setMfaToken] = useState(initialMfaToken || null)
   const [mfaCode, setMfaCode] = useState('')
   const [mfaLoading, setMfaLoading] = useState(false)
+
+  useEffect(() => {
+    if (initialMfaToken) setMfaToken(initialMfaToken)
+  }, [initialMfaToken])
 
   function switchCodeMode(mode) {
     setCodeMode(mode)
     setError(null)
-    setReissueMessage(null)
+    setCodeAuthNotice(null)
   }
 
   async function handleCodeSignup(e) {
@@ -369,7 +377,10 @@ function LoginScreen({ onToken }) {
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       const data = await resp.json()
-      onToken(data.token)
+      // サインアップ単体ではセッションを発行しない(コードの持ち主であることを
+      // 確認する前にログインさせない仕様)。届いたコードを入力する画面へ誘導する。
+      setCodeAuthNotice(data.message)
+      setCodeMode('login')
     } catch (err) {
       setError(String(err))
     } finally {
@@ -424,7 +435,7 @@ function LoginScreen({ onToken }) {
   async function handleCodeReissue(e) {
     e.preventDefault()
     setError(null)
-    setReissueMessage(null)
+    setCodeAuthNotice(null)
     setCodeLoading(true)
     try {
       const resp = await fetch(`${API_ORIGIN}/auth/code/reissue`, {
@@ -434,7 +445,7 @@ function LoginScreen({ onToken }) {
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       const data = await resp.json()
-      setReissueMessage(data.message)
+      setCodeAuthNotice(data.message)
     } catch (err) {
       setError(String(err))
     } finally {
@@ -466,7 +477,11 @@ function LoginScreen({ onToken }) {
           })
           if (!resp.ok) throw new Error(await readErrorMessage(resp))
           const data = await resp.json()
-          onToken(data.token)
+          if (data.mfa_required) {
+            setMfaToken(data.mfa_token)
+          } else {
+            onToken(data.token)
+          }
         } catch (err) {
           setError(String(err))
         }
@@ -489,7 +504,11 @@ function LoginScreen({ onToken }) {
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       const data = await resp.json()
-      onToken(data.token)
+      if (data.mfa_required) {
+        setMfaToken(data.mfa_token)
+      } else {
+        onToken(data.token)
+      }
     } catch (err) {
       setError(String(err))
     }
@@ -500,8 +519,21 @@ function LoginScreen({ onToken }) {
       client_id: githubClientId,
       redirect_uri: githubRedirectUri,
       scope: 'read:user user:email',
+      state: 'github',
     })
     window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`
+  }
+
+  function handleMicrosoftSignIn() {
+    const params = new URLSearchParams({
+      client_id: microsoftClientId,
+      redirect_uri: microsoftRedirectUri,
+      response_type: 'code',
+      response_mode: 'query',
+      scope: 'openid profile email User.Read',
+      state: 'microsoft',
+    })
+    window.location.href = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${params.toString()}`
   }
 
   async function handleDevLogin() {
@@ -592,6 +624,16 @@ function LoginScreen({ onToken }) {
           </button>
           {!githubClientId && <small className="login-hint">サーバーでGITHUB_CLIENT_IDが未設定です</small>}
 
+          <button
+            type="button"
+            className="login-button login-button-microsoft"
+            disabled={!microsoftClientId}
+            onClick={handleMicrosoftSignIn}
+          >
+            Microsoftでサインイン
+          </button>
+          {!microsoftClientId && <small className="login-hint">サーバーでMICROSOFT_CLIENT_IDが未設定です</small>}
+
           <div className="login-divider">または</div>
 
           <div className="code-auth">
@@ -653,6 +695,7 @@ function LoginScreen({ onToken }) {
                 <button type="submit" className="login-button" disabled={codeLoading}>
                   {codeLoading ? '処理中…' : 'ログインコードでログイン'}
                 </button>
+                {codeAuthNotice && <p className="login-hint">{codeAuthNotice}</p>}
               </form>
             )}
 
@@ -668,7 +711,7 @@ function LoginScreen({ onToken }) {
                 <button type="submit" className="login-button" disabled={codeLoading}>
                   {codeLoading ? '処理中…' : 'ログインコードを再発行してメールで送る'}
                 </button>
-                {reissueMessage && <p className="login-hint">{reissueMessage}</p>}
+                {codeAuthNotice && <p className="login-hint">{codeAuthNotice}</p>}
               </form>
             )}
           </div>
@@ -2229,6 +2272,12 @@ function formatEventType(type) {
   return labels[type] || type
 }
 
+function loginEventBadgeClass(type) {
+  if (type === 'login_success' || type === 'mfa_enabled') return 'login-badge-success'
+  if (type === 'login_locked' || type === 'login_failed' || type.endsWith('_failed')) return 'login-badge-danger'
+  return 'login-badge-neutral'
+}
+
 function SecuritySettings({ onClose }) {
   const [status, setStatus] = useState(null) // { enabled, pending }
   const [secret, setSecret] = useState(null)
@@ -2418,6 +2467,145 @@ function AdminStat({ label, value, sub }) {
   )
 }
 
+const LOGIN_EVENT_TYPE_OPTIONS = [
+  { value: '', label: 'すべての種別' },
+  { value: 'login_success', label: 'ログイン成功' },
+  { value: 'login_failed', label: 'ログイン失敗' },
+  { value: 'login_locked', label: 'アカウント一時ロック' },
+  { value: 'mfa_failed', label: '認証アプリのコード不一致' },
+  { value: 'mfa_enabled', label: '多要素認証を有効化' },
+  { value: 'mfa_disabled', label: '多要素認証を無効化' },
+]
+
+const ADMIN_LOGIN_LOGS_PAGE_SIZE = 50
+
+// 公開後はApple/Google/GitHub/メールコードの全ログイン方式でイベントが積み上がるため、
+// 種別・ユーザーID/メールアドレスで絞り込みつつページングして見られるようにする。
+function AdminLoginLogs() {
+  const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [eventType, setEventType] = useState('')
+  const [q, setQ] = useState('')
+  const [qInput, setQInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const load = useCallback(async (nextOffset, nextEventType, nextQ) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({
+        limit: String(ADMIN_LOGIN_LOGS_PAGE_SIZE),
+        offset: String(nextOffset),
+      })
+      if (nextEventType) params.set('event_type', nextEventType)
+      if (nextQ) params.set('q', nextQ)
+      const resp = await apiFetch(`/admin/logins?${params.toString()}`)
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const result = await resp.json()
+      setItems(result.items)
+      setTotal(result.total)
+      setOffset(nextOffset)
+    } catch (e) {
+      setError(e.message || '読み込みに失敗しました。')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    load(0, eventType, q)
+  }, [load, eventType, q])
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault()
+    setQ(qInput.trim())
+  }
+
+  const canPrev = offset > 0
+  const canNext = offset + items.length < total
+
+  return (
+    <section className="section-card admin-login-logs">
+      <div className="admin-login-logs-header">
+        <h3>ログイン履歴</h3>
+        <span className="admin-login-logs-total">{total.toLocaleString('ja-JP')}件</span>
+      </div>
+
+      <div className="admin-login-logs-filters">
+        <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
+          {LOGIN_EVENT_TYPE_OPTIONS.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        <form onSubmit={handleSearchSubmit} className="admin-login-logs-search">
+          <input
+            type="text"
+            placeholder="ユーザーID・メールアドレスで検索"
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+          />
+          <button type="submit">検索</button>
+        </form>
+      </div>
+
+      {error && <div className="error admin-error">{error}</div>}
+
+      <div className="admin-login-logs-table-wrap">
+        <table className="admin-login-logs-table">
+          <thead>
+            <tr>
+              <th>日時</th>
+              <th>種別</th>
+              <th>対象</th>
+              <th>詳細</th>
+              <th>IPアドレス</th>
+              <th>User-Agent</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((ev) => (
+              <tr key={ev.id}>
+                <td className="admin-login-logs-date">
+                  {new Date(ev.created_at).toLocaleString('ja-JP', {
+                    year: 'numeric', month: 'numeric', day: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  })}
+                </td>
+                <td>
+                  <span className={`login-badge ${loginEventBadgeClass(ev.event_type)}`}>
+                    {formatEventType(ev.event_type)}
+                  </span>
+                </td>
+                <td className="admin-login-logs-subject">{ev.subject}</td>
+                <td>{ev.detail || '—'}</td>
+                <td>{ev.ip_address || '—'}</td>
+                <td className="admin-login-logs-ua" title={ev.user_agent || ''}>{ev.user_agent || '—'}</td>
+              </tr>
+            ))}
+            {!loading && items.length === 0 && (
+              <tr>
+                <td colSpan={6} className="admin-login-logs-empty">まだ記録がありません。</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="admin-login-logs-pager">
+        <button type="button" disabled={!canPrev || loading} onClick={() => load(Math.max(0, offset - ADMIN_LOGIN_LOGS_PAGE_SIZE), eventType, q)}>
+          ← 前へ
+        </button>
+        <span>{total === 0 ? '0件' : `${offset + 1}〜${offset + items.length} / ${total}件`}</span>
+        <button type="button" disabled={!canNext || loading} onClick={() => load(offset + ADMIN_LOGIN_LOGS_PAGE_SIZE, eventType, q)}>
+          次へ →
+        </button>
+      </div>
+    </section>
+  )
+}
+
 // 運営者向け管理ダッシュボード(/admin)。app.py側の/admin/overviewが
 // ADMIN_EMAILS/ADMIN_USER_IDSに該当しないユーザーには403を返すので、
 // その場合はここでエラーメッセージだけを表示する。
@@ -2425,6 +2613,7 @@ function AdminDashboard({ onLogout, onBack }) {
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('overview')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -2466,64 +2655,92 @@ function AdminDashboard({ onLogout, onBack }) {
         </button>
       </div>
 
+      <div className="admin-tabs">
+        <button
+          type="button"
+          className={tab === 'overview' ? 'active' : ''}
+          onClick={() => setTab('overview')}
+        >
+          概要
+        </button>
+        <button
+          type="button"
+          className={tab === 'logins' ? 'active' : ''}
+          onClick={() => setTab('logins')}
+        >
+          ログイン履歴
+        </button>
+      </div>
+
       <div className="admin-body">
-        {loading && !data && <div className="app-loading">読み込み中…</div>}
-        {error && <div className="error admin-error">{error}</div>}
-
-        {data && (
+        {tab === 'overview' && (
           <>
-            <div className="admin-grid">
-              <AdminStat
-                label="総ユーザー数"
-                value={data.users.total}
-                sub={`直近7日 +${data.users.new_7d}人 / 直近30日 +${data.users.new_30d}人`}
-              />
-              <AdminStat
-                label="アクティブユーザー(24時間)"
-                value={data.users.active_24h}
-                sub={`直近7日では${data.users.active_7d}人`}
-              />
-              <AdminStat
-                label="有料ユーザー"
-                value={data.plans.paying}
-                sub={`Pro ${data.plans.pro}人 / Max ${data.plans.max}人 / Free ${data.plans.free}人`}
-              />
-              <AdminStat
-                label="今期のトークン利用量(全ユーザー合計)"
-                value={data.usage.tokens_used_this_period.toLocaleString('ja-JP')}
-                sub="ユーザーごとに月初(UTC)でロールオーバー"
-              />
-              <AdminStat
-                label="生成件数(累計)"
-                value={data.generations.total}
-                sub={`直近7日 ${data.generations.last_7d}件 / 直近30日 ${data.generations.last_30d}件`}
-              />
-            </div>
+            {loading && !data && <div className="app-loading">読み込み中…</div>}
+            {error && <div className="error admin-error">{error}</div>}
 
-            <section className="section-card admin-events">
-              <h3>直近のセキュリティイベント</h3>
-              {data.recent_security_events.length === 0 ? (
-                <p className="security-panel-hint">まだ記録がありません。</p>
-              ) : (
-                <ul className="security-event-list">
-                  {data.recent_security_events.map((ev, i) => (
-                    <li key={i}>
-                      <span className="security-event-type">{formatEventType(ev.event_type)}</span>
-                      <span className="admin-event-subject">{ev.subject}</span>
-                      <span className="security-event-date">
-                        {new Date(ev.created_at).toLocaleString('ja-JP', {
-                          month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                        })}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
+            {data && (
+              <>
+                <div className="admin-grid">
+                  <AdminStat
+                    label="総ユーザー数"
+                    value={data.users.total}
+                    sub={`直近7日 +${data.users.new_7d}人 / 直近30日 +${data.users.new_30d}人`}
+                  />
+                  <AdminStat
+                    label="アクティブユーザー(24時間)"
+                    value={data.users.active_24h}
+                    sub={`直近7日では${data.users.active_7d}人`}
+                  />
+                  <AdminStat
+                    label="有料ユーザー"
+                    value={data.plans.paying}
+                    sub={`Pro ${data.plans.pro}人 / Max ${data.plans.max}人 / Free ${data.plans.free}人`}
+                  />
+                  <AdminStat
+                    label="今期のトークン利用量(全ユーザー合計)"
+                    value={data.usage.tokens_used_this_period.toLocaleString('ja-JP')}
+                    sub="ユーザーごとに月初(UTC)でロールオーバー"
+                  />
+                  <AdminStat
+                    label="生成件数(累計)"
+                    value={data.generations.total}
+                    sub={`直近7日 ${data.generations.last_7d}件 / 直近30日 ${data.generations.last_30d}件`}
+                  />
+                </div>
 
-            <p className="admin-generated-at">最終更新: {new Date(data.generated_at).toLocaleString('ja-JP')}</p>
+                <section className="section-card admin-events">
+                  <div className="admin-events-header">
+                    <h3>直近のセキュリティイベント</h3>
+                    <button type="button" className="admin-events-see-all" onClick={() => setTab('logins')}>
+                      すべて見る →
+                    </button>
+                  </div>
+                  {data.recent_security_events.length === 0 ? (
+                    <p className="security-panel-hint">まだ記録がありません。</p>
+                  ) : (
+                    <ul className="security-event-list">
+                      {data.recent_security_events.map((ev, i) => (
+                        <li key={i}>
+                          <span className="security-event-type">{formatEventType(ev.event_type)}</span>
+                          <span className="admin-event-subject">{ev.subject}</span>
+                          <span className="security-event-date">
+                            {new Date(ev.created_at).toLocaleString('ja-JP', {
+                              month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                            })}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </section>
+
+                <p className="admin-generated-at">最終更新: {new Date(data.generated_at).toLocaleString('ja-JP')}</p>
+              </>
+            )}
           </>
         )}
+
+        {tab === 'logins' && <AdminLoginLogs />}
       </div>
     </div>
   )
@@ -2586,22 +2803,36 @@ export default function App() {
     return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
   }, [])
 
-  // GitHubのOAuth認可コード(?code=...)がURLに付いていたら、トークンに交換する。
+  // GitHub/MicrosoftのOAuth認可コード(?code=...)がURLに付いていたら、トークンに交換する。
+  // どちらも同じ?code=形式でリダイレクトしてくるため、認可リクエスト時に付けた
+  // state(github/microsoft)で行き先のエンドポイントを判別する(state無し=旧来のGitHub扱い)。
+  // MFAが有効なアカウントの場合はセッショントークンではなくmfa_tokenが返るので、
+  // LoginScreenへ渡して認証アプリのコード入力画面を表示させる(画面遷移を伴う
+  // リダイレクトフローのため、mfaTokenの状態はここ=親側で一時的に保持する)。
+  const [pendingMfaToken, setPendingMfaToken] = useState(null)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
     if (!code) return
 
+    const state = params.get('state')
+    const isMicrosoft = state === 'microsoft'
+    const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
+
     setAuthExchanging(true)
-    fetch(`${API_ORIGIN}/auth/github`, {
+    fetch(`${API_ORIGIN}/auth/${isMicrosoft ? 'microsoft' : 'github'}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(isMicrosoft ? { code, redirect_uri: microsoftRedirectUri } : { code }),
     })
       .then(async (resp) => {
         if (resp.ok) {
           const data = await resp.json()
-          setAuthToken(data.token)
+          if (data.mfa_required) {
+            setPendingMfaToken(data.mfa_token)
+          } else {
+            setAuthToken(data.token)
+          }
         }
       })
       .finally(() => {
@@ -3079,7 +3310,7 @@ export default function App() {
   }
 
   if (!authToken) {
-    return <LoginScreen onToken={setAuthToken} />
+    return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} />
   }
 
   if (pathname === '/admin') {
