@@ -212,6 +212,55 @@ def test_exchange_github_code_for_user_raises_when_no_access_token(monkeypatch):
             auth.exchange_github_code_for_user("bad-code")
 
 
+# --- Microsoft ---
+
+
+def test_exchange_microsoft_code_for_user_success(monkeypatch):
+    def fake_post(url, data=None, headers=None, timeout=None):
+        assert url == auth.MICROSOFT_TOKEN_URL
+        assert data["code"] == "the-code"
+        assert data["redirect_uri"] == "https://app.example.com"
+        return _FakeResponse({"access_token": "fake-graph-token"})
+
+    def fake_get(url, headers=None, timeout=None):
+        assert url == auth.MICROSOFT_GRAPH_ME_URL
+        return _FakeResponse({"id": "ms-user-1", "mail": "user@example.com"})
+
+    with patch("auth.requests.post", side_effect=fake_post), patch("auth.requests.get", side_effect=fake_get):
+        result = auth.exchange_microsoft_code_for_user("the-code", "https://app.example.com")
+
+    assert result == {"sub": "ms-user-1", "email": "user@example.com"}
+
+
+def test_exchange_microsoft_code_for_user_falls_back_to_user_principal_name(monkeypatch):
+    def fake_post(url, data=None, headers=None, timeout=None):
+        return _FakeResponse({"access_token": "fake-graph-token"})
+
+    def fake_get(url, headers=None, timeout=None):
+        # 個人のMicrosoftアカウントなど、mailが無くuserPrincipalNameしか無い場合がある。
+        return _FakeResponse({"id": "ms-user-2", "mail": None, "userPrincipalName": "user@outlook.com"})
+
+    with patch("auth.requests.post", side_effect=fake_post), patch("auth.requests.get", side_effect=fake_get):
+        result = auth.exchange_microsoft_code_for_user("the-code", "https://app.example.com")
+
+    assert result == {"sub": "ms-user-2", "email": "user@outlook.com"}
+
+
+def test_exchange_microsoft_code_for_user_requires_client_credentials(monkeypatch):
+    monkeypatch.setattr(auth, "MICROSOFT_CLIENT_ID", "")
+    with pytest.raises(auth.AuthError):
+        auth.exchange_microsoft_code_for_user("irrelevant", "https://app.example.com")
+
+
+def test_exchange_microsoft_code_for_user_raises_when_no_access_token(monkeypatch):
+    def fake_post(url, data=None, headers=None, timeout=None):
+        return _FakeResponse({"error": "invalid_grant"})
+
+    with patch("auth.requests.post", side_effect=fake_post):
+        with pytest.raises(auth.AuthError):
+            auth.exchange_microsoft_code_for_user("bad-code", "https://app.example.com")
+
+
 # --- アプリ独自セッションJWT ---
 
 

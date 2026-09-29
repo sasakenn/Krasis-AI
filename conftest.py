@@ -20,6 +20,8 @@ os.environ.setdefault("APPLE_CLIENT_ID", "test.apple.client.id")
 os.environ.setdefault("GOOGLE_CLIENT_ID", "test.google.client.id")
 os.environ.setdefault("GITHUB_CLIENT_ID", "test-github-client-id")
 os.environ.setdefault("GITHUB_CLIENT_SECRET", "test-github-client-secret")
+os.environ.setdefault("MICROSOFT_CLIENT_ID", "test-microsoft-client-id")
+os.environ.setdefault("MICROSOFT_CLIENT_SECRET", "test-microsoft-client-secret")
 
 
 @pytest.fixture(autouse=True)

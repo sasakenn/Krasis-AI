@@ -170,7 +170,9 @@ function mockFetch({
     }
 
     if (url === '/auth/code/signup' && method === 'POST') {
-      return Promise.resolve(jsonResponse({ token: 'code-signup-token' }))
+      // サインアップ単体ではトークンを発行しない(コードの持ち主であることを
+      // 確認する前にログインさせない仕様)。届いたコードは/auth/code/loginで検証する。
+      return Promise.resolve(jsonResponse({ message: 'ログインコードをメールで送信しました。届いたコードでログインしてください。' }))
     }
 
     if (url === '/auth/code/login' && method === 'POST') {
@@ -696,7 +698,7 @@ describe('LoginScreen', () => {
     expect(screen.getByRole('button', { name: /GitHubでサインイン/ })).toBeDisabled()
   })
 
-  it('signs up with email and logs in immediately without showing any code', async () => {
+  it('signs up with email, then requires the emailed code before logging in', async () => {
     render(<App />)
     await waitFor(() => expect(screen.getByPlaceholderText('メールアドレス')).toBeInTheDocument())
 
@@ -705,8 +707,21 @@ describe('LoginScreen', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'メールで登録してログインコードを発行' }))
 
+    // サインアップ直後はまだログインしていない(コードの持ち主であることを
+    // 確認する前にセッションを発行しない仕様)。ログインタブへ自動的に切り替わり、
+    // コード入力欄が表示される。
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('12桁のログインコード')).toBeInTheDocument()
+    )
+    expect(localStorage.getItem('paper-assistant-token')).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText('12桁のログインコード'), {
+      target: { value: 'abc123def456' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'ログインコードでログイン' }))
+
     await waitFor(() => expect(screen.getByText('今日は何をしますか?')).toBeInTheDocument())
-    expect(localStorage.getItem('paper-assistant-token')).toBe('code-signup-token')
+    expect(localStorage.getItem('paper-assistant-token')).toBe('code-login-token')
   })
 
   it('logs in with an existing email and code', async () => {

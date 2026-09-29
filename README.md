@@ -77,20 +77,23 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 任意で参考資料・フォーマット指定ファイルも添付できます: `-F "reference_files=@notes.txt" -F "format_file=@format.txt"`
 
-## 認証(Apple / Google / GitHub でのログイン) — マルチユーザー・Web強制ログイン対応
+## 認証(Apple / Google / GitHub / Microsoft でのログイン) — マルチユーザー・Web強制ログイン対応
 
 `/generate` `/history*` `/sessions*` `/me` はすべて `Authorization: Bearer <token>` を要求し、`generations` / `sessions` はDB上でuser_idごとに分離されます(他人のデータは一覧にも出ないし、直接IDを指定しても404になります)。フロントエンドも強制ログイン制で、未ログインだと専用のログイン画面が表示されます。
 
-**ログイン方法は4つ**、いずれもフロントエンドのログイン画面から使えます:
+**ログイン方法は5つ**、いずれもフロントエンドのログイン画面から使えます:
 
 | 方法 | フロントエンドに必要な設定 | バックエンドに必要な設定 |
 |---|---|---|
 | Apple | `frontend/.env` の `VITE_APPLE_CLIENT_ID` | `.env` の `APPLE_CLIENT_ID` |
 | Google | `frontend/.env` の `VITE_GOOGLE_CLIENT_ID` | `.env` の `GOOGLE_CLIENT_ID` |
 | GitHub | `frontend/.env` の `VITE_GITHUB_CLIENT_ID` / `VITE_GITHUB_REDIRECT_URI` | `.env` の `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` |
+| Microsoft | `frontend/.env` の `VITE_MICROSOFT_CLIENT_ID` / `VITE_MICROSOFT_REDIRECT_URI` | `.env` の `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` |
 | メール+ログインコード | 設定不要(常に使える) | 任意で`SMTP_*`(下記) |
 
-各プロバイダーのクライアントID等は無料で取得できます(Apple Developer Programは登録自体が有料の$99/年)。未設定のプロバイダーはログイン画面でボタンが無効表示になるだけで、他のプロバイダーやアプリ全体の動作には影響しません。
+各プロバイダーのクライアントID等は無料で取得できます(Apple Developer Programのみ登録自体が有料の$99/年、Google/GitHub/Microsoftはアプリ登録自体は無料)。未設定のプロバイダーはログイン画面でボタンが無効表示になるだけで、他のプロバイダーやアプリ全体の動作には影響しません。
+
+Microsoftは個人アカウント・組織(Microsoft 365等)アカウントのどちらでもログインできるマルチテナント設定を前提にしています(Azure Portal→「アプリの登録」→「サポートされているアカウントの種類」で「任意の組織のディレクトリ内のアカウントと個人のMicrosoftアカウント」を選択)。GitHubと同じ認可コード方式(OIDCではない)で、Microsoft Graph APIの`/me`からプロフィールを取得します。「リダイレクトURI」には本番URL(例: `https://app.krasis.xyz`)を「Web」プラットフォームとして登録してください。
 
 **⚠️ 同じ人でもプロバイダー(方法)が違えば別アカウント扱いです**(例: Appleでログインした後にGoogleでログインしても、内部的には別ユーザーとしてデータが分かれます)。自動アカウント統合は未実装です。
 
@@ -98,7 +101,7 @@ curl -X POST http://127.0.0.1:8000/generate \
 
 Google/GitHubのアカウントを使いたくない場合向けに、外部アカウント不要のログイン方式も用意されています。ログイン画面で:
 
-1. **新規登録**: メールアドレスを入力すると、12桁の乱数コード(例: `a3f9e2b71c4d`)が発行されます。**この画面にしか表示されないので、その場で紙などに控えてください**(念のためメールにも同じコードを送ります)。「控えました。続ける」を押すとそのままログインします。
+1. **新規登録**: メールアドレスを入力すると、12桁の乱数コード(例: `a3f9e2b71c4d`)がメールでのみ届きます(画面やAPIレスポンスには一切表示されません)。この時点ではまだログインしておらず、続けて「ログイン」タブでそのコードを入力する必要があります(コードの持ち主であることを確認する前にセッションを発行しない仕様。他人のメールアドレスを指定するだけでそのアカウントに侵入できてしまう脆弱性を防ぐため)。
 2. **ログイン**: 登録済みのメールアドレス+コードでログインします。
 3. **コードを忘れた**: メールアドレスを入力すると新しいコードが発行され、メールで送られます(古いコードは失効します)。登録の有無を外部に漏らさないため、未登録のメールアドレスでも同じ完了メッセージが表示されます。
 
