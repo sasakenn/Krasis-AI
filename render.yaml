@@ -68,3 +68,21 @@ services:
         sync: false
       - key: SECURITY_CONTACT_EMAIL
         sync: false
+
+  # Krasisのコーポレートサイト(site/index.html)。ビルド不要の静的サイトとして配信する。
+  # 独自ドメインはRenderダッシュボードでDNS設定を確認するまで有効にならない。
+  - type: web
+    name: krasis-site
+    runtime: static
+    buildCommand: ""
+    staticPublishPath: ./site
+    domains:
+      - krasis.xyz
+      - www.krasis.xyz
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
