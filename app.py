@@ -66,7 +66,6 @@ from db import (
     get_generation,
     get_history_entry,
     get_mfa_enrollment,
-    bump_token_version,
     get_or_create_entitlement,
     get_token_version,
     get_user_email,

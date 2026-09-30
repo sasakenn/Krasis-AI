@@ -711,8 +711,6 @@ def test_admin_logins_filters_by_event_type():
 
 
 def test_oauth_login_failure_is_recorded_as_security_event():
-    import db
-
     resp = client.post("/auth/google", json={"id_token": "not-a-real-token"})
     assert resp.status_code == 401
 
@@ -985,13 +983,18 @@ def test_course_chat_blocked_with_402_when_quota_exceeded(monkeypatch):
     assert resp.status_code == 402
 
 
+def _fake_brush_off_if_exclamation(text):
+    return {"reply": None, "_token_usage": {"input_tokens": 0, "output_tokens": 0}}
+
+
 def test_course_chat_increments_usage():
     import db
 
     headers = {"X-Dev-User-Id": "course-chat-usage-tracking-user"}
     before = db.get_or_create_entitlement("course-chat-usage-tracking-user")["tokens_used"]
 
-    with patch("app.answer_course_question", side_effect=_fake_answer_course_question):
+    with patch("app.answer_course_question", side_effect=_fake_answer_course_question), \
+         patch("app.brush_off_if_exclamation", side_effect=_fake_brush_off_if_exclamation):
         resp = client.post(
             "/course-chat",
             json={
@@ -1010,7 +1013,8 @@ def test_course_chat_increments_usage():
 def test_course_chat_rate_limit_returns_429_when_exceeded(monkeypatch):
     monkeypatch.setattr(app_module, "COURSE_CHAT_RATE_LIMIT_PER_MINUTE", 1)
 
-    with patch("app.answer_course_question", side_effect=_fake_answer_course_question):
+    with patch("app.answer_course_question", side_effect=_fake_answer_course_question), \
+         patch("app.brush_off_if_exclamation", side_effect=_fake_brush_off_if_exclamation):
         first = client.post(
             "/course-chat",
             json={
@@ -1157,7 +1161,8 @@ def test_ai_agents_chat_increments_usage():
     headers = {"X-Dev-User-Id": "ai-agents-chat-usage-tracking-user"}
     before = db.get_or_create_entitlement("ai-agents-chat-usage-tracking-user")["tokens_used"]
 
-    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question), \
+         patch("app.brush_off_if_exclamation", side_effect=_fake_brush_off_if_exclamation):
         resp = client.post(
             "/ai-agents-chat",
             json={
@@ -1175,7 +1180,8 @@ def test_ai_agents_chat_increments_usage():
 def test_ai_agents_chat_rate_limit_returns_429_when_exceeded(monkeypatch):
     monkeypatch.setattr(app_module, "AI_AGENTS_CHAT_RATE_LIMIT_PER_MINUTE", 1)
 
-    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question), \
+         patch("app.brush_off_if_exclamation", side_effect=_fake_brush_off_if_exclamation):
         first = client.post(
             "/ai-agents-chat",
             json={**_AI_AGENTS_BASE_PAYLOAD, "messages": [{"role": "user", "content": "1回目"}]},
