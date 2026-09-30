@@ -245,6 +245,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         response.headers.setdefault("Content-Security-Policy", CONTENT_SECURITY_POLICY)
+        # Viteのビルド出力(/assets/*)はファイル名にコンテンツハッシュが入るため、
+        # 中身が変わればURLも変わる → 恒久キャッシュして問題ない。
+        # 一方それ以外(index.html本体やSPAフォールバック)はどのハッシュ付きJSを読むかを
+        # 指定する張本人なので、ブラウザのヒューリスティックキャッシュで長時間居座られると
+        # デプロイ後も古いバンドルを読み続けてしまう。毎回サーバーに再検証させる。
+        if request.url.path.startswith("/assets/"):
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif request.method == "GET" and "text/html" in response.headers.get("content-type", ""):
+            response.headers["Cache-Control"] = "no-cache"
         if FORCE_HTTPS:
             # preload: HSTS事前読み込みリスト(hstspreload.org)への登録を見据えて付与する。
             # ヘッダーを送るだけでは自動登録されない(登録には別途申請が必要)ため、
