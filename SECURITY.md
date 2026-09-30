@@ -12,12 +12,20 @@ Paper Assistant のセキュリティ対策の実装箇所と、運用手順(イ
 
 | 対策 | 実装箇所 |
 |---|---|
-| パスワードを自社で保存しない(Apple/Google/GitHub の外部認証、またはメール+ログインコード) | `auth.py`, `app.py` `/auth/*` |
-| ログインコードはSHA-256ハッシュのみ保存し、定数時間比較で照合 | `app.py` `_hash_code`, `hmac.compare_digest` |
-| TOTP方式の多要素認証(認証アプリ)。有効化するとログインコードだけではログインできない | `mfa.py`, `app.py` `/auth/mfa/*`, `db.py` `mfa_enrollments` |
+| パスワードを自社で保存しない(Apple/Google/GitHub/Microsoft の外部認証、またはメール+ログインコード) | `auth.py`, `app.py` `/auth/*` |
+| ログインコードは、鍵付き(pepper)HMAC-SHA256のハッシュのみ保存し、定数時間比較で照合(DBダンプだけでのオフライン総当たりを防ぐ) | `app.py` `_hash_code`, `CODE_HASH_PEPPER`, `hmac.compare_digest` |
+| ログインコードは発行から既定24時間で失効し、単なる乱数が"恒久パスワード"化しない | `app.py` `_is_code_expired`, `CODE_LOGIN_TTL_SECONDS`, `db.py` `code_logins.code_issued_at` |
+| メール確認前にセッションを発行しない(コード確認済みの`/auth/code/login`でのみトークン発行) | `app.py` `auth_code_signup` / `auth_code_login` |
+| サインアップ時、メールアドレスが登録済みかどうかを外部に漏らさない(account enumeration対策) | `app.py` `auth_code_signup` |
+| TOTP方式の多要素認証(認証アプリ)。有効化するとログインコードだけでなくApple/Google/GitHub/Microsoftでのサインインでも必須になる | `mfa.py`, `app.py` `/auth/mfa/*`, `_issue_session_token`, `db.py` `mfa_enrollments` |
 | MFA入力待ちの仮認証トークンは5分で失効し、通常のAPIには使えない | `auth.py` `create_mfa_token` / `decode_mfa_token` |
+| セッションJWTの一括失効: ログアウト(全端末)、MFA有効化/無効化で、それ以前に発行された全セッション(盗まれていた可能性のあるものを含む)を即座に無効化する。操作を行った当のセッションだけは新トークンで継続する | `app.py` `/auth/logout-all`, `auth_mfa_confirm`, `auth_mfa_disable`, `db.py` `token_version` / `bump_token_version` |
 | 連続ログイン失敗によるアカウント一時ロック(既定: 15分間に10回失敗でロック) | `app.py` `_register_login_failure`, `CODE_AUTH_MAX_FAILURES` |
-| メールアドレス単位のレート制限(既定: 5回/分) | `app.py` `_enforce_code_auth_rate_limit` |
+| メールアドレス単位・送信元IP単位、両方のレート制限(既定: メール5回/分、IP20回/分)。IP単位は、1つのIPから多数の他人のメールアドレスへ送りつける迷惑メール踏み台対策 | `app.py` `_enforce_code_auth_rate_limit` / `_enforce_code_auth_ip_rate_limit` |
+| レート制限・ログイン失敗の状態はプロセス内メモリで管理しつつ、古いエントリを定期的に掃除して無制限な肥大化を防ぐ | `app.py` `_maybe_prune_state_locked` |
+| 監査ログのIPアドレスは、クライアントが偽装できるX-Forwarded-Forの先頭ではなく、信頼できる直前のリバースプロキシ(Render)が付け足す末尾を採用 | `app.py` `_client_ip` |
+| JWT署名鍵(`JWT_SECRET`)は最低32文字を起動時に強制(短すぎる鍵での本番稼働を防ぐ) | `auth.py` |
+| `DEV_BYPASS_USER_ID`(なりすまし用の開発者バイパス)は、本番(`IS_PRODUCTION`)では設定ミスがあっても常に無効 | `app.py` `get_current_user`, `/auth/dev` |
 | APIキー・署名鍵はすべて環境変数(`.env`)で管理し、Gitに含めない | `.env.example`, `.gitignore` |
 
 外部サービスの管理アカウント(Stripe / SendGrid / Cloudflare / Xserver / GitHub / Anthropic Console)は、
@@ -70,6 +78,17 @@ SQLiteに保存する。
 - **手動チェック**: リリース前と月1回、`scripts/security_check.sh` を実行して結果を確認する。
 - Dependabot のPRは1週間以内にレビューしてマージする。`severity: high` 以上は3営業日以内。
 - Python / Node.js のランタイム、ホスティング環境のOSは四半期ごとにサポート状況を確認する。
+
+### 3-1. アプリケーションレベルの脆弱性対策
+
+| 対策 | 実装箇所 |
+|---|---|
+| アップロードファイル1件あたりのサイズ上限(既定20MB)。無制限だとメモリ枯渇・Claude APIへの巨大プロンプト送信(コスト暴走)につながる | `app.py` `_read_upload_within_limit`, `MAX_UPLOAD_MB` |
+| Claude APIに渡すリクエスト本文(topic/description/messages等)の長さ・件数の上限 | `app.py` の各`MAX_*`定数、pydanticモデルの`Field(max_length=...)` |
+| `/history`, `/mode-history` の`limit`クエリパラメータの上限クランプ(負の値によるSQLite `LIMIT -1`=無制限の悪用を防ぐ) | `app.py` `HISTORY_PAGE_SIZE_MAX` |
+| Excel数式インジェクション対策: task-generatorが生成する.xlsxで、SUM/AVERAGE等の許可された単純な集計数式以外の"="始まり文字列は、実際の数式としてではなく無害な文字列として書き込む(第三者が生成物を開いた際の意図しない数式実行を防ぐ) | `task_generator.py` `_sanitize_cell_value` |
+| 文献検索の並列実行スレッド数に上限(Claudeの出力=セクション数にそのまま比例させない) | `app.py` `_attach_literature`, `MAX_LITERATURE_SEARCH_WORKERS` |
+| Content-Security-Policy: インラインスクリプトの実行と、万一XSSが混入した場合の任意ドメインへの持ち出しを防ぐ | `app.py` `SecurityHeadersMiddleware` |
 
 ## 4. インシデント対応手順
 

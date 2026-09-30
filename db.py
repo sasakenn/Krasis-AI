@@ -167,6 +167,17 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_agents_subscriptions (
+                user_id TEXT PRIMARY KEY,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                profile_json TEXT NOT NULL,
+                last_sent_date TEXT,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
         # 列追加前のDBファイルを引き続き使えるようにする簡易マイグレーション。
         _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
@@ -175,6 +186,17 @@ def init_db() -> None:
         _ensure_column(conn, "entitlements", "stripe_customer_id", "TEXT")
         _ensure_column(conn, "security_events", "ip_address", "TEXT")
         _ensure_column(conn, "security_events", "user_agent", "TEXT")
+        # セッションJWTの一括失効(ログアウト、MFA有効化/無効化)用のバージョン番号。
+        # JWTのver claimとこの値が一致しない場合、decode成功後でも無効なトークンとして扱う。
+        # "NOT NULL DEFAULT 0"をDDLに含めることで、既存行だけでなく今後INSERTで
+        # 明示的に指定しなかった新規行にも自動的に0が入る(NULLのままにならない)。
+        _ensure_column(conn, "users", "token_version", "INTEGER NOT NULL DEFAULT 0")
+        # ログインコードの有効期限判定用。作成時のcreated_atとは別に持ち、再発行のたびに
+        # 更新する(古いDBファイルではcreated_atで代用してバックフィルする)。
+        _ensure_column(conn, "code_logins", "code_issued_at", "TEXT")
+        conn.execute(
+            "UPDATE code_logins SET code_issued_at = created_at WHERE code_issued_at IS NULL"
+        )
         conn.execute(
             "INSERT OR IGNORE INTO users (id, email, created_at) VALUES (?, NULL, ?)",
             (LEGACY_USER_ID, datetime.now(timezone.utc).isoformat()),
@@ -199,6 +221,31 @@ def get_user_email(user_id: str) -> str | None:
     with _connect() as conn:
         row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
     return row["email"] if row and row["email"] else None
+
+
+def get_token_version(user_id: str) -> int:
+    """セッションJWTの検証に使う、このユーザーの現在の有効バージョン。
+
+    ユーザー行がまだ存在しない(初回サインイン前)場合は0(初期値)を返す。
+    """
+    with _connect() as conn:
+        row = conn.execute("SELECT token_version FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["token_version"] if row and row["token_version"] is not None else 0
+
+
+def bump_token_version(user_id: str) -> int:
+    """このユーザーの発行済みセッションJWTを全て無効化し、新しいバージョン番号を返す。
+
+    ログアウト(全端末)、MFA有効化・無効化(盗まれたセッションが残っていても
+    無効にするため)で使う。呼び出し元は、必要なら新しいバージョンで
+    そのリクエストの発行元セッションだけ新しいトークンを発行し直す。
+    """
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE users SET token_version = token_version + 1 WHERE id = ?", (user_id,)
+        )
+        row = conn.execute("SELECT token_version FROM users WHERE id = ?", (user_id,)).fetchone()
+    return row["token_version"] if row else 0
 
 
 def save_generation(
@@ -538,26 +585,31 @@ def get_user_id_by_stripe_customer(stripe_customer_id: str) -> str | None:
 
 def create_code_login(user_id: str, email: str, code_hash: str) -> None:
     """メール+ログインコード方式の新規アカウントを作成する。emailは一意である必要がある。"""
+    now_iso = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         conn.execute(
-            "INSERT INTO code_logins (user_id, email, code_hash, created_at) VALUES (?, ?, ?, ?)",
-            (user_id, email, code_hash, datetime.now(timezone.utc).isoformat()),
+            "INSERT INTO code_logins (user_id, email, code_hash, created_at, code_issued_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (user_id, email, code_hash, now_iso, now_iso),
         )
 
 
 def get_code_login_by_email(email: str) -> dict | None:
     with _connect() as conn:
         row = conn.execute(
-            "SELECT user_id, email, code_hash FROM code_logins WHERE email = ?", (email,)
+            "SELECT user_id, email, code_hash, code_issued_at FROM code_logins WHERE email = ?", (email,)
         ).fetchone()
     return dict(row) if row else None
 
 
 def update_code_login_hash(user_id: str, new_code_hash: str) -> bool:
-    """コード再発行時に、ハッシュを新しい値に置き換える(古いコードは無効になる)。"""
+    """コード再発行時に、ハッシュを新しい値に置き換える(古いコードは無効になり、
+    有効期限もこの時点からリセットされる)。
+    """
     with _connect() as conn:
         cursor = conn.execute(
-            "UPDATE code_logins SET code_hash = ? WHERE user_id = ?", (new_code_hash, user_id)
+            "UPDATE code_logins SET code_hash = ?, code_issued_at = ? WHERE user_id = ?",
+            (new_code_hash, datetime.now(timezone.utc).isoformat(), user_id),
         )
         return cursor.rowcount > 0
 
@@ -643,6 +695,66 @@ def mark_task_reminded(task_id: int) -> None:
         conn.execute(
             "UPDATE tasks SET reminded_at = ? WHERE id = ?",
             (datetime.now(timezone.utc).isoformat(), task_id),
+        )
+
+
+def upsert_ai_agents_subscription(user_id: str, enabled: bool, profile: dict) -> None:
+    """ai-agentsの「毎朝9時にリマインド」設定を保存する(プロフィールはJSONにまとめて暗号化)。"""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO ai_agents_subscriptions (user_id, enabled, profile_json, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                enabled = excluded.enabled,
+                profile_json = excluded.profile_json,
+                updated_at = excluded.updated_at
+            """,
+            (user_id, int(enabled), encrypt_text(json.dumps(profile, ensure_ascii=False)), now),
+        )
+
+
+def get_ai_agents_subscription(user_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT user_id, enabled, profile_json, last_sent_date FROM ai_agents_subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    result = dict(row)
+    result["enabled"] = bool(result["enabled"])
+    result["profile"] = json.loads(decrypt_text(result.pop("profile_json")))
+    return result
+
+
+def list_due_ai_agents_subscriptions(today: str) -> list[dict]:
+    """有効化済みで、今日まだ送信していないユーザーを、送信先メールアドレス付きで返す。"""
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT ai_agents_subscriptions.user_id, ai_agents_subscriptions.profile_json, users.email
+            FROM ai_agents_subscriptions
+            JOIN users ON users.id = ai_agents_subscriptions.user_id
+            WHERE ai_agents_subscriptions.enabled = 1
+              AND (ai_agents_subscriptions.last_sent_date IS NULL OR ai_agents_subscriptions.last_sent_date != ?)
+            """,
+            (today,),
+        ).fetchall()
+    results = []
+    for row in rows:
+        item = dict(row)
+        item["profile"] = json.loads(decrypt_text(item.pop("profile_json")))
+        results.append(item)
+    return results
+
+
+def mark_ai_agents_subscription_sent(user_id: str, today: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE ai_agents_subscriptions SET last_sent_date = ? WHERE user_id = ?",
+            (today, user_id),
         )
 
 
@@ -744,6 +856,7 @@ _LOGIN_EVENT_TYPES = (
     "mfa_disable_failed",
     "mfa_enabled",
     "mfa_disabled",
+    "logout_all",
 )
 
 
@@ -775,10 +888,12 @@ def list_login_events(
         ).fetchone()["n"]
         rows = conn.execute(
             f"""
-            SELECT id, created_at, event_type, subject, detail, ip_address, user_agent
-            FROM security_events
+            SELECT se.id, se.created_at, se.event_type, se.subject, se.detail,
+                   se.ip_address, se.user_agent, u.email AS subject_email
+            FROM security_events se
+            LEFT JOIN users u ON u.id = se.subject OR u.email = se.subject
             WHERE {where_sql}
-            ORDER BY id DESC
+            ORDER BY se.id DESC
             LIMIT ? OFFSET ?
             """,
             params + [limit, offset],
@@ -934,9 +1049,10 @@ def get_admin_overview() -> dict:
             dict(row)
             for row in conn.execute(
                 """
-                SELECT created_at, event_type, subject, detail
-                FROM security_events
-                ORDER BY id DESC
+                SELECT se.created_at, se.event_type, se.subject, se.detail, u.email AS subject_email
+                FROM security_events se
+                LEFT JOIN users u ON u.id = se.subject OR u.email = se.subject
+                ORDER BY se.id DESC
                 LIMIT 10
                 """
             ).fetchall()

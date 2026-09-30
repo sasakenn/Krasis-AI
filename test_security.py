@@ -75,7 +75,9 @@ def test_mfa_setup_confirm_and_full_login_flow():
 
     confirm = client.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
     assert confirm.status_code == 200
-    assert confirm.json() == {"enabled": True}
+    assert confirm.json()["enabled"] is True
+    # MFA有効化は既存セッションを一括失効させるので、以後はconfirmが返した新トークンを使う。
+    headers = _auth_headers(confirm.json()["token"])
 
     status = client.get("/auth/mfa/status", headers=headers)
     assert status.json() == {"enabled": True, "pending": False}
@@ -102,14 +104,18 @@ def test_mfa_disable_requires_current_code():
     headers = _auth_headers(body["token"])
 
     secret = client.post("/auth/mfa/setup", headers=headers).json()["secret"]
-    client.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
+    confirm = client.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
+    # MFA有効化は既存セッションを一括失効させるので、以後はconfirmが返した新トークンを使う。
+    headers = _auth_headers(confirm.json()["token"])
 
     wrong = client.post("/auth/mfa/disable", json={"code": "000000"}, headers=headers)
     assert wrong.status_code == 401
 
     right = client.post("/auth/mfa/disable", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
     assert right.status_code == 200
-    assert right.json() == {"enabled": False}
+    assert right.json()["enabled"] is False
+    # MFA無効化も同様に既存セッションを一括失効させる。
+    headers = _auth_headers(right.json()["token"])
 
     status = client.get("/auth/mfa/status", headers=headers)
     assert status.json() == {"enabled": False, "pending": False}
@@ -120,7 +126,8 @@ def test_mfa_setup_blocked_when_already_enabled():
     headers = _auth_headers(body["token"])
 
     secret = client.post("/auth/mfa/setup", headers=headers).json()["secret"]
-    client.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
+    confirm = client.post("/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers)
+    headers = _auth_headers(confirm.json()["token"])
 
     second_setup = client.post("/auth/mfa/setup", headers=headers)
     assert second_setup.status_code == 409
@@ -146,6 +153,23 @@ def test_login_lockout_after_repeated_failures(monkeypatch):
 
     locked = client.post("/auth/code/login", json={"email": email, "code": "000000000000"})
     assert locked.status_code == 423
+
+
+def test_client_ip_trusts_the_proxy_appended_hop_not_the_client_supplied_one():
+    """X-Forwarded-Forの先頭(左端)はクライアントが任意の値を偽装できるため、
+    監査ログのip_addressには、信頼できる直前のプロキシ(Render等)が付け足した
+    末尾(右端)の値を使う。先頭を使っていた頃の回帰テスト。
+    """
+    email = "spoofed-ip-test@example.com"
+    resp = client.post(
+        "/auth/code/login",
+        json={"email": email, "code": "000000000000"},
+        headers={"X-Forwarded-For": "1.2.3.4 (spoofed by attacker), 203.0.113.9"},
+    )
+    assert resp.status_code == 401
+
+    events, _ = db.list_login_events(limit=10, q=email)
+    assert events[0]["ip_address"] == "203.0.113.9"
 
 
 def test_encrypted_generation_content_round_trips(monkeypatch):
@@ -212,3 +236,95 @@ def test_oversized_request_bodies_are_rejected_before_hitting_claude():
         headers=_auth_headers(token),
     )
     assert resp.status_code == 422  # pydanticのFieldバリデーション(max_length)による拒否
+
+
+# --- セッション一括失効(ログアウト全端末・MFA変更時の既存セッション無効化) ---
+
+
+def test_logout_all_invalidates_old_token_but_returns_a_working_new_one():
+    body, _ = _signup_and_login("logout-all-test@example.com")
+    old_token = body["token"]
+    old_headers = _auth_headers(old_token)
+
+    # 古いトークンはまだ有効
+    assert client.get("/me", headers=old_headers).status_code == 200
+
+    logout_resp = client.post("/auth/logout-all", headers=old_headers)
+    assert logout_resp.status_code == 200
+    new_token = logout_resp.json()["token"]
+    assert new_token and new_token != old_token
+
+    # 古いトークンは失効済み、新しいトークンは有効
+    assert client.get("/me", headers=old_headers).status_code == 401
+    assert client.get("/me", headers=_auth_headers(new_token)).status_code == 200
+
+
+def test_mfa_enable_invalidates_other_sessions_but_current_one_keeps_working():
+    body, _ = _signup_and_login("mfa-invalidate-test@example.com")
+    old_token = body["token"]
+    old_headers = _auth_headers(old_token)
+
+    secret = client.post("/auth/mfa/setup", headers=old_headers).json()["secret"]
+    confirm = client.post(
+        "/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=old_headers
+    )
+    assert confirm.status_code == 200
+    new_token = confirm.json()["token"]
+    assert new_token and new_token != old_token
+
+    # MFA有効化前に発行されていたトークン(盗まれていた可能性がある)は失効する
+    assert client.get("/me", headers=old_headers).status_code == 401
+    # 有効化リクエストを行った当のセッションは、新トークンで継続して使える
+    assert client.get("/me", headers=_auth_headers(new_token)).status_code == 200
+
+
+def test_mfa_disable_invalidates_other_sessions_but_current_one_keeps_working():
+    body, _ = _signup_and_login("mfa-disable-invalidate-test@example.com")
+    token_a = body["token"]
+    headers_a = _auth_headers(token_a)
+
+    secret = client.post("/auth/mfa/setup", headers=headers_a).json()["secret"]
+    confirm = client.post(
+        "/auth/mfa/confirm", json={"code": pyotp.TOTP(secret).now()}, headers=headers_a
+    )
+    token_b = confirm.json()["token"]
+    headers_b = _auth_headers(token_b)
+
+    disable = client.post(
+        "/auth/mfa/disable", json={"code": pyotp.TOTP(secret).now()}, headers=headers_b
+    )
+    assert disable.status_code == 200
+    token_c = disable.json()["token"]
+    assert token_c and token_c != token_b
+
+    # 無効化前のセッション(token_b)は失効。無効化リクエスト自身は新トークンで継続。
+    assert client.get("/me", headers=headers_b).status_code == 401
+    assert client.get("/me", headers=_auth_headers(token_c)).status_code == 200
+
+
+# --- レート制限状態の無制限な肥大化対策 ---
+
+
+def test_rate_limit_state_is_pruned_once_its_window_has_passed(monkeypatch):
+    """古い時間ウィンドウのエントリは、ウィンドウが進んだ後の掃除で削除され、
+    プロセスが動き続ける限り無制限に肥大化しないことの回帰テスト。"""
+    monkeypatch.setattr(app_module, "_STATE_PRUNE_EVERY_N_CALLS", 10)
+    app_module._rate_limit_state.clear()
+    app_module._prune_call_counter = 0
+
+    # 1分目: 異なるキーを多数叩く(この時点ではまだ「現在のウィンドウ」なので消えない)。
+    fake_now = 1_000_000.0
+    monkeypatch.setattr(app_module.time, "time", lambda: fake_now)
+    for i in range(20):
+        app_module._enforce_rate_limit("prune-test", f"key-{i}", limit=1000, message="")
+    assert len(app_module._rate_limit_state) == 20
+
+    # 2分目に進む: 古いウィンドウのエントリは、掃除タイミングが来れば削除されるはず。
+    fake_now += 61
+    monkeypatch.setattr(app_module.time, "time", lambda: fake_now)
+    for i in range(20, 20 + app_module._STATE_PRUNE_EVERY_N_CALLS):
+        app_module._enforce_rate_limit("prune-test", f"key-{i}", limit=1000, message="")
+
+    remaining_keys = set(app_module._rate_limit_state.keys())
+    old_keys = {f"prune-test:key-{i}" for i in range(20)}
+    assert not (remaining_keys & old_keys)

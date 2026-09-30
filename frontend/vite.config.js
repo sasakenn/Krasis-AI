@@ -8,6 +8,8 @@ export default defineConfig({
     proxy: {
       '/generate': 'http://127.0.0.1:8000',
       '/course-chat': 'http://127.0.0.1:8000',
+      '/ai-agents-chat': 'http://127.0.0.1:8000',
+      '/ai-agents-subscription': 'http://127.0.0.1:8000',
       '/health': 'http://127.0.0.1:8000',
       '/history': 'http://127.0.0.1:8000',
       '/sessions': 'http://127.0.0.1:8000',

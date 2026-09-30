@@ -26,6 +26,15 @@ from pypdf import PdfReader
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from ai_agents import (
+    CATEGORY_LABELS,
+    LEVEL_LABELS,
+    REGION_LABELS,
+    REGIONS_BY_CATEGORY,
+    ROLE_LABELS,
+    answer_finance_economics_question,
+)
+from lang_utils import ai_agents_email_subject, default_question, normalize_lang
 from auth import (
     AuthError,
     create_app_token,
@@ -37,8 +46,10 @@ from auth import (
     verify_apple_identity_token,
     verify_google_id_token,
 )
+from auth import JWT_SECRET as JWT_SECRET_FOR_PEPPER
 from db import (
     add_token_usage,
+    bump_token_version,
     create_code_login,
     create_session,
     create_task,
@@ -50,15 +61,19 @@ from db import (
     enable_mfa,
     get_activity_summary,
     get_admin_overview,
+    get_ai_agents_subscription,
     get_code_login_by_email,
     get_generation,
     get_history_entry,
     get_mfa_enrollment,
+    bump_token_version,
     get_or_create_entitlement,
+    get_token_version,
     get_user_email,
     get_user_id_by_stripe_customer,
     init_db,
     is_mfa_enabled,
+    list_due_ai_agents_subscriptions,
     list_due_reminders,
     list_generations,
     list_history_entries,
@@ -66,6 +81,7 @@ from db import (
     list_security_events,
     list_sessions,
     list_tasks,
+    mark_ai_agents_subscription_sent,
     mark_task_reminded,
     record_activity_ping,
     record_security_event,
@@ -80,6 +96,7 @@ from db import (
     update_code_login_hash,
     update_history_entry,
     update_session,
+    upsert_ai_agents_subscription,
     upsert_user,
 )
 from mfa import generate_secret as generate_mfa_secret
@@ -127,13 +144,67 @@ async def _task_reminder_loop() -> None:
         await asyncio.sleep(TASK_REMINDER_POLL_SECONDS)
 
 
+# ai-agentsで「毎朝9時にリマインド」に登録したユーザーへ、その日の経済・金融レポートを
+# メールで届ける。日次のポーリング(_ai_agents_report_loop)で、JSTの9時を過ぎていて
+# かつ今日まだ送っていないユーザーだけを対象にする(1日1回に限定するのが目的で、
+# 「ちょうど9:00:00」を厳密に狙う必要はない)。
+_AI_AGENTS_REPORT_JST = timezone(timedelta(hours=9))
+
+
+def _send_due_ai_agents_reports() -> None:
+    now_jst = datetime.now(_AI_AGENTS_REPORT_JST)
+    if now_jst.hour < 9:
+        return
+
+    today = now_jst.strftime("%Y-%m-%d")
+    for sub in list_due_ai_agents_subscriptions(today):
+        user_id = sub["user_id"]
+        email = sub.get("email")
+        if not email:
+            # メール未登録では送りようがないが、無限に再試行し続けないよう既読扱いにする。
+            mark_ai_agents_subscription_sent(user_id, today)
+            continue
+
+        profile = sub["profile"]
+        sub_lang = normalize_lang(profile.get("lang"))
+        result = answer_finance_economics_question(
+            profile.get("level", ""),
+            profile.get("role", ""),
+            profile.get("purpose", ""),
+            profile.get("categories", []),
+            profile.get("regions", {}),
+            [{"role": "user", "content": default_question(sub_lang)}],
+            sub_lang,
+        )
+        usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+        add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+
+        send_email(
+            email,
+            ai_agents_email_subject(sub_lang),
+            result["answer"],
+        )
+        mark_ai_agents_subscription_sent(user_id, today)
+
+
+async def _ai_agents_report_loop() -> None:
+    while True:
+        try:
+            _send_due_ai_agents_reports()
+        except Exception:
+            logger.exception("ai-agentsの定期レポート送信でエラーが発生しました")
+        await asyncio.sleep(AI_AGENTS_REPORT_POLL_SECONDS)
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     reminder_task = asyncio.create_task(_task_reminder_loop())
+    ai_agents_report_task = asyncio.create_task(_ai_agents_report_loop())
     try:
         yield
     finally:
         reminder_task.cancel()
+        ai_agents_report_task.cancel()
 
 
 # フロントエンド(frontend/index.html)が実際に読み込む外部オリジンだけを許可する
@@ -142,14 +213,16 @@ async def _lifespan(_app: FastAPI):
 # CSPで塞ぐのが狙い。新たに外部スクリプト/APIを追加した場合はここも更新すること。
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' https://appleid.cdn-apple.com https://accounts.google.com",
+    "script-src 'self' https://accounts.google.com",
     # Viteのビルド出力に含まれる<style>タグ(起動演出)のためstyle-srcのみ'unsafe-inline'を許容する。
     # スクリプトの実行はscript-srcで厳格に絞っているため、XSSの主な入口はここでは塞がれたまま。
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    # https://accounts.google.com はGoogle Identity Servicesのサインインボタンが読み込む
+    # スタイルシート(https://accounts.google.com/gsi/style)用。
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com",
     "font-src 'self' https://fonts.gstatic.com",
     "img-src 'self' data:",
-    "connect-src 'self' https://appleid.apple.com https://accounts.google.com",
-    "frame-src https://accounts.google.com https://appleid.apple.com",
+    "connect-src 'self' https://accounts.google.com",
+    "frame-src https://accounts.google.com",
     "frame-ancestors 'self'",
     "base-uri 'none'",
     "form-action 'self'",
@@ -205,20 +278,42 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_MB", "20")) * 1024 * 1024
 # 1リクエストでの巨大プロンプト送信(コスト暴走・メモリ圧迫)を許してしまう。
 MAX_DESCRIPTION_LENGTH = 4000
 MAX_COURSE_CHAT_MESSAGES = 60
+MAX_AI_AGENTS_CHAT_MESSAGES = 60
 MAX_PAPER_BODY_SECTIONS = 30
 MAX_TRANSLATE_TITLES = 50
 MAX_TOPIC_LENGTH = 2000
 MAX_STUDY_NOTES_FOCUS_LENGTH = 500
 
+# /history, /mode-history の limit クエリパラメータの上限。上限が無いと
+# limit=999999999 のような指定でDBから大量に読み出させたり、負の値を渡してSQLiteの
+# LIMIT無効化(LIMIT -1は無制限)を悪用させたりできてしまう。
+HISTORY_PAGE_SIZE_MAX = 200
+
+# _attach_literature の並列検索スレッド数の上限(セクション数にそのまま比例させない)。
+MAX_LITERATURE_SEARCH_WORKERS = 8
+
 # 初回プロンプト送信時に確認する分量(文字数)の選択肢。
-LENGTH_OPTIONS = [
-    {"key": "1-100", "label": "1〜100文字"},
-    {"key": "101-1000", "label": "101〜1000文字"},
-    {"key": "1001-3000", "label": "1001〜3000文字"},
-    {"key": "3001-5000", "label": "3001〜5000文字"},
-    {"key": "5001-10000", "label": "5001〜10000文字"},
+LENGTH_OPTION_RANGES = [
+    ("1-100", 1, 100),
+    ("101-1000", 101, 1000),
+    ("1001-3000", 1001, 3000),
+    ("3001-5000", 3001, 5000),
+    ("5001-10000", 5001, 10000),
 ]
-LENGTH_OPTION_KEYS = {opt["key"] for opt in LENGTH_OPTIONS}
+LENGTH_OPTION_KEYS = {key for key, _, _ in LENGTH_OPTION_RANGES}
+
+_LENGTH_UNIT = {"ja": "文字", "en": "characters", "ko": "자"}
+_LENGTH_QUESTION_MESSAGE = {
+    "ja": "生成する分量の目安を選んでください。",
+    "en": "Please choose the target length.",
+    "ko": "생성할 분량의 기준을 선택해 주세요.",
+}
+
+
+def _length_options(lang: str) -> list:
+    unit = _LENGTH_UNIT.get(lang, _LENGTH_UNIT["ja"])
+    sep = "-" if lang == "en" else "〜"
+    return [{"key": key, "label": f"{lo}{sep}{hi}{unit}"} for key, lo, hi in LENGTH_OPTION_RANGES]
 
 # 開発時のみ: この値を設定すると、Apple/Google/GitHubでのログインを経ずに
 # `X-Dev-User-Id` ヘッダーで任意のuser_idを名乗ってアクセスできる。
@@ -240,17 +335,30 @@ GENERATE_RATE_LIMIT_PER_MINUTE = int(os.getenv("GENERATE_RATE_LIMIT_PER_MINUTE",
 # スパム送信等)を防ぐための、メールアドレスごとの1分あたりの上限リクエスト数。
 CODE_AUTH_RATE_LIMIT_PER_MINUTE = int(os.getenv("CODE_AUTH_RATE_LIMIT_PER_MINUTE", "5"))
 
+# 上記はメールアドレスごとの上限だが、それとは別に発信元IPごとの上限も設ける。
+# メールアドレス単位の制限だけだと、1つのIPから多数の「他人のメールアドレス」に
+# 次々とログインコードを送りつける迷惑メール踏み台にできてしまうため。
+# 1つのオフィス/NAT配下から複数ユーザーが使うケースを考慮し、メール単位より緩めにする。
+CODE_AUTH_IP_RATE_LIMIT_PER_MINUTE = int(os.getenv("CODE_AUTH_IP_RATE_LIMIT_PER_MINUTE", "20"))
+
 # ログインコード/MFAコードの連続失敗によるアカウント一時ロック。
 # 直近LOCKOUT_SECONDSの間にMAX_FAILURES回失敗すると、最後の失敗からLOCKOUT_SECONDSの間は
 # そのメールアドレスでのログインを拒否する。MAX_FAILURESが0以下なら無効。
 CODE_AUTH_MAX_FAILURES = int(os.getenv("CODE_AUTH_MAX_FAILURES", "10"))
 CODE_AUTH_LOCKOUT_SECONDS = int(os.getenv("CODE_AUTH_LOCKOUT_SECONDS", "900"))
 
+# ログインコードの有効期限(既定24時間)。単なる乱数の「恒久パスワード」化を防ぐため、
+# 発行(または再発行)から一定時間が過ぎたコードは(正しくても)ログインに使えなくする。
+# 0以下で無効化(無期限)。
+CODE_LOGIN_TTL_SECONDS = int(os.getenv("CODE_LOGIN_TTL_SECONDS", str(24 * 60 * 60)))
+
 # 本番で1にすると、HTTPアクセスをHTTPSへリダイレクトしHSTSヘッダーを付与する。
 FORCE_HTTPS = os.getenv("FORCE_HTTPS", "").strip() in ("1", "true", "yes")
 # Renderは全サービスにRENDER=trueを自動設定する。ローカル開発(SMTP未設定でログ出力に
-# フォールバックする)と本番(メール送信が必須)を区別するために使う。
-IS_PRODUCTION = bool(os.getenv("RENDER"))
+# フォールバックする)と本番(メール送信必須・DEV_BYPASS強制無効化・DATA_ENCRYPTION_KEY
+# 必須等)を区別するために使う。Renderを介さない自前ホスティングでも同じ本番向けの
+# 厳格化を有効にできるよう、APP_ENV=production でも明示的にオプトインできるようにする。
+IS_PRODUCTION = bool(os.getenv("RENDER")) or os.getenv("APP_ENV", "").strip().lower() == "production"
 
 # 保存データの暗号化(AES-256-GCM、crypto_utils参照)は本番では必須にする。
 # DATA_ENCRYPTION_KEY未設定のまま気づかず本番稼働し、生成内容やMFAシークレットが
@@ -265,6 +373,10 @@ if IS_PRODUCTION and not crypto_utils.is_configured():
 # /course-chat 1件あたりClaude APIを呼ぶため、/generateと同様にユーザーごとの
 # 1分あたりの上限リクエスト数でコスト暴走を防ぐ。0以下で無効化。
 COURSE_CHAT_RATE_LIMIT_PER_MINUTE = int(os.getenv("COURSE_CHAT_RATE_LIMIT_PER_MINUTE", "20"))
+
+# /ai-agents-chat 1件あたりClaude APIを呼ぶため、/course-chatと同様にユーザーごとの
+# 1分あたりの上限リクエスト数でコスト暴走を防ぐ。0以下で無効化。
+AI_AGENTS_CHAT_RATE_LIMIT_PER_MINUTE = int(os.getenv("AI_AGENTS_CHAT_RATE_LIMIT_PER_MINUTE", "20"))
 
 # /tasks 1件あたりClaude APIを呼ぶため、同様にユーザーごとの1分あたりの上限リクエスト数で
 # コスト暴走を防ぐ。0以下で無効化。
@@ -288,6 +400,10 @@ ACTIVITY_PING_RATE_LIMIT_PER_MINUTE = int(os.getenv("ACTIVITY_PING_RATE_LIMIT_PE
 
 # タスクのリマインド時刻を何秒おきにチェックしてメール送信するか。
 TASK_REMINDER_POLL_SECONDS = int(os.getenv("TASK_REMINDER_POLL_SECONDS", "60"))
+
+# ai-agentsの「毎朝9時にリマインド」を何秒おきにチェックして送信するか。
+# 秒単位で9時ちょうどを狙う必要はない(1日1回に限定するのが目的)ため、taskのリマインドより緩め。
+AI_AGENTS_REPORT_POLL_SECONDS = int(os.getenv("AI_AGENTS_REPORT_POLL_SECONDS", "300"))
 
 # 月額プランごとのトークン枠(仮の数値)。従来値の25%(75%減)で運用。
 PLAN_TOKEN_QUOTAS: Dict[str, int] = {"free": 50_000, "pro": 300_000, "max": 1_500_000}
@@ -313,6 +429,43 @@ _rate_limit_state: Dict[str, Tuple[int, int]] = {}
 
 # メールアドレス → (最後に失敗した時刻, 直近ウィンドウ内の連続失敗回数)
 _login_failure_state: Dict[str, Tuple[float, int]] = {}
+
+# 上記2つの辞書は、異なるメールアドレス/キーを大量に叩かれ続けると際限なく肥大化する
+# (プロセスが再起動されるまでエントリが残り続ける)。呼び出し一定回数ごとに、既に
+# 無意味になった古いエントリをまとめて掃除してメモリ使用量に上限をかける。
+_STATE_PRUNE_EVERY_N_CALLS = 500
+_prune_call_counter = 0
+
+
+def _prune_expired_rate_limit_state(now_window: int) -> None:
+    """現在のウィンドウに属さないrate-limitエントリを削除する(呼び出し元でロック済み前提)。
+
+    ウィンドウが変われば、そのキーの古いカウントは_enforce_rate_limit側でもリセットされる
+    ので、削除しても正しさには影響しない(次回そのキーが来た時点で0から数え直すだけ)。
+    """
+    stale_keys = [k for k, (window_start, _) in _rate_limit_state.items() if window_start != now_window]
+    for k in stale_keys:
+        del _rate_limit_state[k]
+
+
+def _prune_expired_login_failure_state(now: float) -> None:
+    """ロック期間が完全に過ぎたlogin-failureエントリを削除する(呼び出し元でロック済み前提)。"""
+    stale_keys = [
+        k for k, (last_failure, _) in _login_failure_state.items()
+        if now - last_failure >= CODE_AUTH_LOCKOUT_SECONDS
+    ]
+    for k in stale_keys:
+        del _login_failure_state[k]
+
+
+def _maybe_prune_state_locked(now: float, now_window: int) -> None:
+    """呼び出し一定回数ごとに古いエントリを掃除する。呼び出し元でロック済み前提。"""
+    global _prune_call_counter
+    _prune_call_counter += 1
+    if _prune_call_counter % _STATE_PRUNE_EVERY_N_CALLS == 0:
+        _prune_expired_rate_limit_state(now_window)
+        _prune_expired_login_failure_state(now)
+
 
 LOCKED_MESSAGE = "ログインの失敗が続いたため、このアカウントは一時的にロックされています。しばらく待ってから再試行してください。"
 
@@ -344,6 +497,7 @@ def _register_login_failure(key: str) -> None:
             count = 0
         count += 1
         _login_failure_state[key] = (now, count)
+        _maybe_prune_state_locked(now, int(now // 60))
     if count == CODE_AUTH_MAX_FAILURES:
         record_security_event("login_locked", key, f"{count}回連続で失敗したため{CODE_AUTH_LOCKOUT_SECONDS}秒間ロック")
 
@@ -353,7 +507,24 @@ def _clear_login_failures(key: str) -> None:
         _login_failure_state.pop(key, None)
 
 
+# 開発用ログイン(X-Dev-User-Id ヘッダー / POST /auth/dev)は、このMacで直接動かして
+# いるときにだけ使うことを想定している。IS_PRODUCTIONでなくても、バックエンドは既定で
+# 0.0.0.0で待ち受けており同じLAN上の別端末から直接アクセスできてしまうため、環境に
+# 加えて「TCP接続の実際の送信元がこのマシン自身(ループバック)かどうか」でも絞り込む。
+# X-Forwarded-Forは接続元が自由に詐称できるヘッダーなので信用せず、Starlette/uvicornが
+# 実際のソケットから取るrequest.client.hostだけを見る。
+# "testclient" はStarletteのTestClient(ネットワークを経由しないin-process呼び出し)が
+# 使うプレースホルダーホスト名で、テストスイートがこの経路を使い続けられるように許可する。
+_DEV_BYPASS_ALLOWED_HOSTS = {"127.0.0.1", "::1", "testclient"}
+
+
+def _is_same_machine_request(request: Request) -> bool:
+    client_host = request.client.host if request.client else None
+    return client_host in _DEV_BYPASS_ALLOWED_HOSTS
+
+
 def get_current_user(
+    request: Request,
     authorization: Optional[str] = Header(default=None),
     x_dev_user_id: Optional[str] = Header(default=None),
 ) -> str:
@@ -361,12 +532,13 @@ def get_current_user(
 
     DEV_BYPASS_USER_ID が設定されている開発環境に限り、X-Dev-User-Id ヘッダーで
     Sign in with Appleを経ずにuser_idを直接指定できる(ローカルでの動作確認用)。
+    ただしこのMac自身からのアクセス(ループバック)でなければ使えない。
 
     IS_PRODUCTION(Render上での実行)の場合は、DEV_BYPASS_USER_IDが誤って
     設定されていてもこのバイパスを無効化する(任意のuser_idへのなりすましを
     許してしまうため、環境変数の設定ミス1つで本番が突破される事態を防ぐ)。
     """
-    if DEV_BYPASS_USER_ID and x_dev_user_id and not IS_PRODUCTION:
+    if DEV_BYPASS_USER_ID and x_dev_user_id and not IS_PRODUCTION and _is_same_machine_request(request):
         return x_dev_user_id
 
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -374,9 +546,16 @@ def get_current_user(
 
     token = authorization[len("Bearer "):].strip()
     try:
-        return decode_app_token(token)
+        user_id, token_version = decode_app_token(token)
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # ログアウト(全端末)・MFA有効化/無効化でtoken_versionが繰り上がっていたら、
+    # 有効期限内のJWTでも「既に失効したセッション」として拒否する。
+    if token_version != get_token_version(user_id):
+        raise HTTPException(status_code=401, detail="session has been signed out, please log in again")
+
+    return user_id
 
 
 def _is_admin(user_id: str) -> bool:
@@ -399,13 +578,15 @@ def _enforce_rate_limit(bucket: str, key: str, limit: int, message: str) -> None
         return
 
     state_key = f"{bucket}:{key}"
-    window = int(time.time() // 60)
+    now = time.time()
+    window = int(now // 60)
     with _rate_limit_lock:
         window_start, count = _rate_limit_state.get(state_key, (window, 0))
         if window_start != window:
             window_start, count = window, 0
         count += 1
         _rate_limit_state[state_key] = (window_start, count)
+        _maybe_prune_state_locked(now, window)
 
     if count > limit:
         raise HTTPException(status_code=429, detail=message)
@@ -429,12 +610,33 @@ def _enforce_code_auth_rate_limit(email: str) -> None:
     )
 
 
+def _enforce_code_auth_ip_rate_limit(ip_address: str) -> None:
+    """1つのIPから多数の他人のメールアドレスへ送りつける迷惑メール踏み台を防ぐ。"""
+    if not ip_address:
+        return
+    _enforce_rate_limit(
+        "code-auth-ip",
+        ip_address,
+        CODE_AUTH_IP_RATE_LIMIT_PER_MINUTE,
+        "リクエストが多すぎます。しばらく待って再試行してください。",
+    )
+
+
 def _enforce_course_chat_rate_limit(key: str) -> None:
     _enforce_rate_limit(
         "course-chat",
         key,
         COURSE_CHAT_RATE_LIMIT_PER_MINUTE,
         "course-chatのレート制限を超えました。しばらく待って再試行してください。",
+    )
+
+
+def _enforce_ai_agents_chat_rate_limit(key: str) -> None:
+    _enforce_rate_limit(
+        "ai-agents-chat",
+        key,
+        AI_AGENTS_CHAT_RATE_LIMIT_PER_MINUTE,
+        "ai-agents-chatのレート制限を超えました。しばらく待って再試行してください。",
     )
 
 
@@ -554,6 +756,33 @@ class CourseChatRequest(BaseModel):
     department: str = Field(default="", max_length=200)
     messages: List[CourseChatMessage] = Field(max_length=MAX_COURSE_CHAT_MESSAGES)
     history_id: Optional[int] = None
+    lang: str = Field(default="ja", max_length=5)
+
+
+class AiAgentsChatMessage(BaseModel):
+    role: str = Field(max_length=20)
+    content: str = Field(max_length=8000)
+
+
+class AiAgentsChatRequest(BaseModel):
+    level: str = Field(max_length=30)
+    role: str = Field(max_length=30)
+    purpose: str = Field(default="", max_length=200)
+    categories: List[str] = Field(min_length=1, max_length=2)
+    regions: Dict[str, str] = Field(max_length=2)
+    messages: List[AiAgentsChatMessage] = Field(max_length=MAX_AI_AGENTS_CHAT_MESSAGES)
+    history_id: Optional[int] = None
+    lang: str = Field(default="ja", max_length=5)
+
+
+class AiAgentsSubscriptionRequest(BaseModel):
+    enabled: bool
+    level: str = Field(max_length=30)
+    role: str = Field(max_length=30)
+    purpose: str = Field(default="", max_length=200)
+    categories: List[str] = Field(min_length=1, max_length=2)
+    regions: Dict[str, str] = Field(max_length=2)
+    lang: str = Field(default="ja", max_length=5)
 
 
 class PaperBodyRequest(BaseModel):
@@ -561,6 +790,7 @@ class PaperBodyRequest(BaseModel):
     research_question: str = Field(default="", max_length=2000)
     sections: List[Dict[str, Any]] = Field(max_length=MAX_PAPER_BODY_SECTIONS)
     target_length: str = ""
+    lang: str = Field(default="ja", max_length=5)
 
 
 class TranslateTitlesRequest(BaseModel):
@@ -571,6 +801,7 @@ class TranslateTitlesRequest(BaseModel):
 class TaskCreateRequest(BaseModel):
     description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
     deadline: Optional[str] = None  # ISO8601文字列(任意)
+    lang: str = Field(default="ja", max_length=5)
 
 
 class TaskStatusUpdate(BaseModel):
@@ -580,6 +811,7 @@ class TaskStatusUpdate(BaseModel):
 class TaskGeneratorRequest(BaseModel):
     description: str = Field(max_length=MAX_DESCRIPTION_LENGTH)
     kind: str = "text"  # "text" | "excel"
+    lang: str = Field(default="ja", max_length=5)
 
 
 def _extract_pdf_text(raw: bytes) -> str:
@@ -712,7 +944,11 @@ def _attach_literature(outline: dict, limit: int = 3) -> dict:
     if not sections:
         return outline
 
-    with ThreadPoolExecutor(max_workers=len(sections)) as executor:
+    # max_workersをセクション数にそのまま比例させると、Claudeの出力(こちらが直接
+    # 制御できない)次第でスレッド数が際限なく増えうる。OpenAlexへの同時リクエスト数を
+    # 抑える意味でも、常識的な上限でクランプする。
+    max_workers = min(len(sections), MAX_LITERATURE_SEARCH_WORKERS)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {
             executor.submit(
                 search_literature_diverse,
@@ -737,11 +973,18 @@ def health():
 
 
 def _client_ip(request: Request) -> str:
-    """プロキシ(Render等)経由のリクエストでも発信元IPを取れるよう、
-    まずX-Forwarded-Forの先頭(クライアントに最も近い側)を見る。"""
+    """プロキシ(Render等)経由のリクエストでも発信元IPを取れるよう、X-Forwarded-Forを見る。
+
+    このヘッダーはクライアントが任意の値を付けて送ってこられるため、先頭(左端)の値は
+    クライアント自身が偽装できてしまう。信頼できるのは、自分の直前にいる唯一の
+    リバースプロキシ(Render等)が追記した末尾(右端)の値だけなので、そちらを使う
+    (Renderは複数ホップを経由しないため、末尾1つだけを信頼すればよい)。
+    自前ホスティングで多段プロキシを使う場合は、末尾から数えて何番目を信頼するかを
+    別途調整すること。
+    """
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return request.client.host if request.client else ""
 
 
@@ -776,7 +1019,7 @@ def _issue_session_token(provider: str, claims: dict, request: Request) -> dict:
         ip_address=_client_ip(request),
         user_agent=_client_user_agent(request),
     )
-    return {"token": create_app_token(user_id)}
+    return {"token": create_app_token(user_id, get_token_version(user_id))}
 
 
 @app.post("/auth/apple")
@@ -828,13 +1071,17 @@ def auth_microsoft(payload: MicrosoftSignInRequest, request: Request):
 
 
 @app.post("/auth/dev")
-def auth_dev():
+def auth_dev(request: Request):
     """開発用: DEV_BYPASS_USER_ID設定時のみ、ブラウザのログイン画面からワンクリックで
     その固定ユーザーとしてのトークンを取得できる(本番(IS_PRODUCTION)では
-    設定ミスがあっても常に404にする)。"""
-    if not DEV_BYPASS_USER_ID or IS_PRODUCTION:
+    設定ミスがあっても常に404にする)。
+
+    このMac自身(ループバック)からのアクセスでなければ、同じLAN上の他端末からでも
+    404にする(get_current_userのX-Dev-User-Idバイパスと同じ制限)。
+    """
+    if not DEV_BYPASS_USER_ID or IS_PRODUCTION or not _is_same_machine_request(request):
         raise HTTPException(status_code=404, detail="not found")
-    return {"token": create_app_token(DEV_BYPASS_USER_ID)}
+    return {"token": create_app_token(DEV_BYPASS_USER_ID, get_token_version(DEV_BYPASS_USER_ID))}
 
 
 def _normalize_email(email: str) -> str:
@@ -846,8 +1093,27 @@ def _generate_login_code() -> str:
     return secrets.token_hex(6)
 
 
+# ログインコードのハッシュに使うpepper(サーバー側だけが知る秘密鍵)。専用の
+# CODE_HASH_PEPPERが未設定の場合はJWT_SECRETから決定的に導出する(運用者が鍵管理の
+# 手間を増やさずに済むように)。単純なSHA256だとDBダンプだけでオフライン総当たりが
+# 可能になってしまう(コードは12桁16進数=48bitで、pepperなしでは高速に全数探索できる)ため、
+# pepper付きのHMACにすることでDB漏洩だけでは総当たりできないようにする。
+_CODE_HASH_PEPPER = os.getenv("CODE_HASH_PEPPER", "").strip()
+if not _CODE_HASH_PEPPER:
+    _CODE_HASH_PEPPER = hashlib.sha256(f"code-hash-pepper:{JWT_SECRET_FOR_PEPPER}".encode("utf-8")).hexdigest()
+
+
 def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
+    return hmac.new(_CODE_HASH_PEPPER.encode("utf-8"), code.strip().encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _is_code_expired(code_issued_at: str) -> bool:
+    if CODE_LOGIN_TTL_SECONDS <= 0:
+        return False
+    issued = datetime.fromisoformat(code_issued_at)
+    if issued.tzinfo is None:
+        issued = issued.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - issued).total_seconds() > CODE_LOGIN_TTL_SECONDS
 
 
 def _require_mail_configured() -> None:
@@ -864,7 +1130,7 @@ def _require_mail_configured() -> None:
 
 
 @app.post("/auth/code/signup")
-def auth_code_signup(payload: CodeSignupRequest):
+def auth_code_signup(payload: CodeSignupRequest, request: Request):
     """メールアドレスだけで新規アカウントを作り、ログイン用の乱数コードを発行する。
 
     コードはメール(SMTP未設定時はログ出力)でのみ届け、APIレスポンスには含めない。
@@ -876,24 +1142,28 @@ def auth_code_signup(payload: CodeSignupRequest):
     宛のアカウントへ即ログインできてしまう(なりすまし)。実際にコードが
     メールボックスに届いたことを本人が確認できて初めて、/auth/code/login で
     トークンを発行する。
+
+    また、既に登録済みのメールアドレスかどうかもレスポンスで漏らさない(以前は409を
+    返しており、外部から「このメールアドレスは登録済みかどうか」を調べられてしまう
+    account enumerationの経路になっていた)。登録済みの場合は/auth/code/reissueと
+    同様にコードを再発行して同じ文面のメールを送るだけにする。
     """
     email = _normalize_email(payload.email)
     if "@" not in email or len(email) < 3:
         raise HTTPException(status_code=400, detail="有効なメールアドレスを入力してください")
 
     _enforce_code_auth_rate_limit(email)
+    _enforce_code_auth_ip_rate_limit(_client_ip(request))
     _require_mail_configured()
 
-    if get_code_login_by_email(email):
-        raise HTTPException(
-            status_code=409,
-            detail="このメールアドレスは既に登録されています。ログインまたはコードの再発行をご利用ください。",
-        )
-
-    user_id = f"code:{uuid.uuid4().hex}"
     code = _generate_login_code()
-    create_code_login(user_id, email, _hash_code(code))
-    upsert_user(user_id, email)
+    existing = get_code_login_by_email(email)
+    if existing:
+        update_code_login_hash(existing["user_id"], _hash_code(code))
+    else:
+        user_id = f"code:{uuid.uuid4().hex}"
+        create_code_login(user_id, email, _hash_code(code))
+        upsert_user(user_id, email)
 
     send_email(
         email,
@@ -921,13 +1191,21 @@ def auth_code_login(payload: CodeLoginRequest, request: Request):
         record_security_event("login_failed", email, "ログインコード不一致", ip_address=ip_address, user_agent=user_agent)
         raise HTTPException(status_code=401, detail="メールアドレスまたはコードが正しくありません")
 
+    if _is_code_expired(record["code_issued_at"]):
+        _register_login_failure(email)
+        record_security_event("login_failed", email, "ログインコード期限切れ", ip_address=ip_address, user_agent=user_agent)
+        raise HTTPException(
+            status_code=401,
+            detail="ログインコードの有効期限が切れました。「ログインコードを忘れた」から再発行してください。",
+        )
+
     user_id = record["user_id"]
     if is_mfa_enabled(user_id):
         return {"mfa_required": True, "mfa_token": create_mfa_token(user_id)}
 
     _clear_login_failures(email)
     record_security_event("login_success", user_id, "ログインコード", ip_address=ip_address, user_agent=user_agent)
-    return {"token": create_app_token(user_id)}
+    return {"token": create_app_token(user_id, get_token_version(user_id))}
 
 
 @app.post("/auth/mfa/verify")
@@ -961,17 +1239,18 @@ def auth_mfa_verify(payload: MfaVerifyRequest, request: Request):
     record_security_event(
         "login_success", user_id, f"{first_factor}+認証アプリ", ip_address=ip_address, user_agent=user_agent
     )
-    return {"token": create_app_token(user_id)}
+    return {"token": create_app_token(user_id, get_token_version(user_id))}
 
 
 @app.post("/auth/code/reissue")
-def auth_code_reissue(payload: CodeReissueRequest):
+def auth_code_reissue(payload: CodeReissueRequest, request: Request):
     """コードを忘れた場合、新しいコードを生成してメールで送り直す(古いコードは失効する)。
 
     登録の有無を外部に漏らさないため、メールが未登録でも同じレスポンスを返す。
     """
     email = _normalize_email(payload.email)
     _enforce_code_auth_rate_limit(email)
+    _enforce_code_auth_ip_rate_limit(_client_ip(request))
     _require_mail_configured()
 
     record = get_code_login_by_email(email)
@@ -996,9 +1275,11 @@ async def generate(
     private: bool = Form(False),
     reference_files: Optional[List[UploadFile]] = File(default=None),
     format_file: Optional[UploadFile] = File(default=None),
+    lang: str = Form("ja"),
     user_id: str = Depends(get_current_user),
 ):
     _enforce_generate_rate_limit(user_id)
+    lang = normalize_lang(lang)
 
     if not topic or not topic.strip():
         raise HTTPException(status_code=400, detail="topic is required")
@@ -1025,8 +1306,8 @@ async def generate(
 
         return {
             "type": "length_question",
-            "message": "生成する分量の目安を選んでください。",
-            "options": LENGTH_OPTIONS,
+            "message": _LENGTH_QUESTION_MESSAGE.get(lang, _LENGTH_QUESTION_MESSAGE["ja"]),
+            "options": _length_options(lang),
         }
 
     if target_length not in LENGTH_OPTION_KEYS:
@@ -1041,7 +1322,7 @@ async def generate(
     if format_file and format_file.filename:
         format_notes = await _describe_upload(format_file)
 
-    outline = generate_outline(topic, field, reference_notes, format_notes, target_length)
+    outline = generate_outline(topic, field, reference_notes, format_notes, target_length, lang)
     outline = _attach_literature(outline)
 
     usage = outline.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
@@ -1079,6 +1360,7 @@ def generate_body(payload: PaperBodyRequest, user_id: str = Depends(get_current_
         payload.research_question,
         payload.sections,
         payload.target_length,
+        normalize_lang(payload.lang),
     )
 
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
@@ -1119,6 +1401,7 @@ def course_chat(payload: CourseChatRequest, user_id: str = Depends(get_current_u
         payload.faculty.strip(),
         payload.department,
         [m.model_dump() for m in payload.messages],
+        normalize_lang(payload.lang),
     )
 
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
@@ -1140,6 +1423,122 @@ def course_chat(payload: CourseChatRequest, user_id: str = Depends(get_current_u
         result["history_id"] = entry["id"]
 
     return result
+
+
+def _validate_ai_agents_profile(level: str, role: str, categories: List[str], regions: Dict[str, str]) -> None:
+    """/ai-agents-chatと/ai-agents-subscriptionで共通のプロフィールバリデーション。"""
+    if level not in LEVEL_LABELS:
+        raise HTTPException(status_code=400, detail="invalid level")
+    if role not in ROLE_LABELS:
+        raise HTTPException(status_code=400, detail="invalid role")
+    if not categories or any(cat not in CATEGORY_LABELS for cat in categories):
+        raise HTTPException(status_code=400, detail="invalid categories")
+    if len(set(categories)) != len(categories):
+        raise HTTPException(status_code=400, detail="duplicate categories")
+    for cat in categories:
+        region = regions.get(cat)
+        if region not in REGIONS_BY_CATEGORY.get(cat, []):
+            raise HTTPException(status_code=400, detail="invalid regions")
+
+
+def _ai_agents_title(categories: List[str], regions: Dict[str, str]) -> str:
+    return " / ".join(f"{CATEGORY_LABELS[cat]}・{REGION_LABELS[regions[cat]]}" for cat in categories)
+
+
+@app.post("/ai-agents-chat")
+def ai_agents_chat(payload: AiAgentsChatRequest, user_id: str = Depends(get_current_user)):
+    """AIエージェント: ユーザープロファイル(知識レベル・属性・目的)と選択カテゴリー
+    (Economics/Finance、複数選択可)・地域/市場を踏まえて、経済・金融の状況を
+    パーソナライズして解説するチャット。/course-chatと同じ方針(レート制限・
+    トークンクォータ・感嘆文の受け流し・mode-historyへの保存)で実装する。
+    """
+    _enforce_ai_agents_chat_rate_limit(user_id)
+
+    _validate_ai_agents_profile(payload.level, payload.role, payload.categories, payload.regions)
+    if not payload.messages:
+        raise HTTPException(status_code=400, detail="messages is required")
+
+    entitlement = get_or_create_entitlement(user_id)
+    quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
+    if entitlement["tokens_used"] >= quota:
+        raise HTTPException(
+            status_code=402,
+            detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
+        )
+
+    # 直近の発言が「いいね」のような、実質的な依頼を含まない感嘆文・相槌だけの場合は、
+    # 解説の回答フロー(履歴保存を含む)に入らず短く受け流す。
+    last_message = payload.messages[-1]
+    if last_message.role == "user":
+        brush_off = brush_off_if_exclamation(last_message.content)
+        brush_off_usage = brush_off.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+        add_token_usage(user_id, brush_off_usage["input_tokens"] + brush_off_usage["output_tokens"])
+        if brush_off["reply"]:
+            return {"answer": brush_off["reply"]}
+
+    result = answer_finance_economics_question(
+        payload.level,
+        payload.role,
+        payload.purpose.strip(),
+        payload.categories,
+        payload.regions,
+        [m.model_dump() for m in payload.messages],
+        normalize_lang(payload.lang),
+    )
+
+    usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
+    add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
+
+    title = _ai_agents_title(payload.categories, payload.regions)
+    history_payload = {
+        "level": payload.level,
+        "role": payload.role,
+        "purpose": payload.purpose.strip(),
+        "categories": payload.categories,
+        "regions": payload.regions,
+        "messages": [m.model_dump() for m in payload.messages] + [{"role": "assistant", "content": result["answer"]}],
+    }
+    if payload.history_id and update_history_entry(user_id, payload.history_id, "ai-agents", title, history_payload):
+        result["history_id"] = payload.history_id
+    else:
+        entry = save_history_entry(user_id, "ai-agents", title, history_payload)
+        result["history_id"] = entry["id"]
+
+    return result
+
+
+@app.get("/ai-agents-subscription")
+def get_ai_agents_subscription_status(user_id: str = Depends(get_current_user)):
+    """ai-agentsの「毎朝9時にリマインド」設定の現在の状態を返す(未登録ならenabled=false)。"""
+    sub = get_ai_agents_subscription(user_id)
+    if sub is None:
+        return {"enabled": False, "profile": None}
+    return {"enabled": sub["enabled"], "profile": sub["profile"]}
+
+
+@app.post("/ai-agents-subscription")
+def set_ai_agents_subscription(payload: AiAgentsSubscriptionRequest, user_id: str = Depends(get_current_user)):
+    """ai-agentsのプロフィール設定完了後に「毎朝9時にリマインドしますか?」で
+    Yesが選ばれたときに呼ばれる。有効化すると、以後は_ai_agents_report_loopが
+    毎朝(JST 9時以降)このプロフィールでレポートを生成し、登録メールアドレスへ送る。
+    """
+    _validate_ai_agents_profile(payload.level, payload.role, payload.categories, payload.regions)
+    if payload.enabled and not get_user_email(user_id):
+        raise HTTPException(
+            status_code=400,
+            detail="メールアドレスが未登録のため、メールでのリマインドを有効化できません。",
+        )
+
+    profile = {
+        "level": payload.level,
+        "role": payload.role,
+        "purpose": payload.purpose.strip(),
+        "categories": payload.categories,
+        "regions": payload.regions,
+        "lang": normalize_lang(payload.lang),
+    }
+    upsert_ai_agents_subscription(user_id, payload.enabled, profile)
+    return {"enabled": payload.enabled}
 
 
 @app.post("/literature/translate")
@@ -1202,7 +1601,7 @@ def tasks_create(payload: TaskCreateRequest, user_id: str = Depends(get_current_
 
     deadline_dt = _parse_deadline(payload.deadline) if payload.deadline else None
 
-    result = estimate_task_duration(description)
+    result = estimate_task_duration(description, normalize_lang(payload.lang))
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
     estimated_minutes = result["estimated_minutes"]
@@ -1271,6 +1670,7 @@ def task_generator(payload: TaskGeneratorRequest, user_id: str = Depends(get_cur
     kind="excel"の場合はJSONではなく.xlsxファイルそのものをレスポンスとして返す。
     """
     _enforce_task_generator_rate_limit(user_id)
+    lang = normalize_lang(payload.lang)
 
     description = payload.description.strip()
     if not description:
@@ -1287,7 +1687,7 @@ def task_generator(payload: TaskGeneratorRequest, user_id: str = Depends(get_cur
         )
 
     if payload.kind == "excel":
-        result = generate_task_spreadsheet(description)
+        result = generate_task_spreadsheet(description, lang)
         usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
         add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
 
@@ -1308,7 +1708,7 @@ def task_generator(payload: TaskGeneratorRequest, user_id: str = Depends(get_cur
             headers={"Content-Disposition": _content_disposition(filename)},
         )
 
-    result = generate_task_text(description)
+    result = generate_task_text(description, lang)
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
 
@@ -1327,12 +1727,14 @@ async def study_notes(
     text: str = Form(""),
     focus: str = Form(""),
     file: Optional[UploadFile] = File(default=None),
+    lang: str = Form("ja"),
     user_id: str = Depends(get_current_user),
 ):
     """レポート・資料(貼り付けテキストまたはファイル)を分析し、暗記すべき要点と
     全体の流れ・復習用の質問を整理して返す。
     """
     _enforce_study_notes_rate_limit(user_id)
+    lang = normalize_lang(lang)
 
     if len(focus) > MAX_STUDY_NOTES_FOCUS_LENGTH:
         raise HTTPException(
@@ -1355,7 +1757,7 @@ async def study_notes(
             detail="今月のトークン上限に達しました。プランのアップグレードは近日対応予定です。",
         )
 
-    result = generate_study_notes(document_text[:STUDY_NOTES_MAX_CHARS], focus.strip())
+    result = generate_study_notes(document_text[:STUDY_NOTES_MAX_CHARS], focus.strip(), lang)
     usage = result.pop("_token_usage", {"input_tokens": 0, "output_tokens": 0})
     add_token_usage(user_id, usage["input_tokens"] + usage["output_tokens"])
 
@@ -1372,6 +1774,7 @@ def history(
     scope: Optional[str] = None,
     user_id: str = Depends(get_current_user),
 ):
+    limit = max(1, min(limit, HISTORY_PAGE_SIZE_MAX))
     return {"items": list_generations(user_id, limit=limit, q=q, only_private=(scope == "private"))}
 
 
@@ -1397,10 +1800,10 @@ def history_set_private(generation_id: int, payload: PrivacyUpdate, user_id: str
     return {"status": "ok"}
 
 
-# outline以外の4モード(logic-guide/task-generator/study-notes/tasks)共通の履歴。
+# outline以外の5モード(logic-guide/task-generator/study-notes/tasks/ai-agents)共通の履歴。
 # outlineだけスレッド(セッション)を再構築する専用UIを持つので/historyのまま独立させ、
 # こちらはどのタブを選んでも同じ場所・同じ形で閲覧できる読み取り専用の履歴として使う。
-MODE_HISTORY_MODES = {"logic-guide", "task-generator", "study-notes", "tasks"}
+MODE_HISTORY_MODES = {"logic-guide", "task-generator", "study-notes", "tasks", "ai-agents"}
 
 
 @app.get("/mode-history")
@@ -1413,6 +1816,7 @@ def mode_history(
 ):
     if mode not in MODE_HISTORY_MODES:
         raise HTTPException(status_code=400, detail="invalid mode")
+    limit = max(1, min(limit, HISTORY_PAGE_SIZE_MAX))
     return {"items": list_history_entries(user_id, mode, limit=limit, q=q, only_private=(scope == "private"))}
 
 
@@ -1491,7 +1895,11 @@ def auth_mfa_confirm(payload: MfaCodeRequest, user_id: str = Depends(get_current
 
     enable_mfa(user_id)
     record_security_event("mfa_enabled", user_id)
-    return {"enabled": True}
+    # MFAを有効化した以上、それ以前に発行された(盗まれている可能性のある)セッションは
+    # 全て無効化する。今このリクエストをしているセッション自身はログアウトさせたくない
+    # ので、新しいバージョンのトークンをその場で発行し直して返す。
+    new_version = bump_token_version(user_id)
+    return {"enabled": True, "token": create_app_token(user_id, new_version)}
 
 
 @app.post("/auth/mfa/disable")
@@ -1507,7 +1915,20 @@ def auth_mfa_disable(payload: MfaCodeRequest, user_id: str = Depends(get_current
 
     delete_mfa(user_id)
     record_security_event("mfa_disabled", user_id)
-    return {"enabled": False}
+    # 有効化時と同様、MFA設定変更は既存セッションを全て無効化する
+    # (このリクエスト自身のセッションだけは新トークンを発行して継続させる)。
+    new_version = bump_token_version(user_id)
+    return {"enabled": False, "token": create_app_token(user_id, new_version)}
+
+
+@app.post("/auth/logout-all")
+def auth_logout_all(user_id: str = Depends(get_current_user)):
+    """このアカウントで発行済みの全セッション(他端末・盗まれた可能性のあるトークン含む)を
+    無効化する。呼び出し元自身のセッションだけ、新しいトークンを発行して継続させる。
+    """
+    new_version = bump_token_version(user_id)
+    record_security_event("logout_all", user_id, "全端末からログアウト")
+    return {"token": create_app_token(user_id, new_version)}
 
 
 @app.get("/auth/security-events")

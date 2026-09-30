@@ -11,7 +11,7 @@ client = TestClient(app)
 
 
 def _fake_estimate(minutes=45, reasoning="テスト用の固定見積もり"):
-    def _inner(description):
+    def _inner(description, lang="ja"):
         return {
             "estimated_minutes": minutes,
             "reasoning": reasoning,

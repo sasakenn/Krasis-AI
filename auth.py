@@ -230,22 +230,34 @@ def exchange_microsoft_code_for_user(code: str, redirect_uri: str) -> dict:
     return {"sub": microsoft_user_id, "email": email}
 
 
-def create_app_token(user_id: str) -> str:
-    """検証済みユーザー向けに、以後のAPIリクエストで使うアプリ独自のセッションJWTを発行する。"""
+def create_app_token(user_id: str, token_version: int = 0) -> str:
+    """検証済みユーザー向けに、以後のAPIリクエストで使うアプリ独自のセッションJWTを発行する。
+
+    token_versionはdb.get_token_version()の値をそのまま埋め込む(呼び出し元=app.py側で
+    渡す)。ユーザーのtoken_versionが後から変わった(ログアウト全端末・MFA変更)場合、
+    このJWT自体は有効期限内でも古いバージョンのまま使えなくなる(decode_app_token参照)。
+    """
     if not JWT_SECRET:
         raise AuthError("JWT_SECRET is not configured on the server")
 
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
+        "ver": token_version,
         "iat": int(now.timestamp()),
         "exp": int((now + APP_TOKEN_TTL).timestamp()),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-def decode_app_token(token: str) -> str:
-    """アプリ独自のセッションJWTを検証し、user_idを返す。失敗時はAuthErrorを送出する。"""
+def decode_app_token(token: str) -> tuple[str, int]:
+    """アプリ独自のセッションJWTを検証し、(user_id, token_version)を返す。
+
+    token_versionは呼び出し元がdb.get_token_version(user_id)と突き合わせて、
+    一括失効(ログアウト・MFA変更)後の古いトークンを拒否するために使う
+    (このモジュール自体はDBを参照しないので、突き合わせ自体は行わない)。
+    失敗時はAuthErrorを送出する。
+    """
     if not JWT_SECRET:
         raise AuthError("JWT_SECRET is not configured on the server")
 
@@ -260,7 +272,8 @@ def decode_app_token(token: str) -> str:
     # MFA入力待ちの仮認証トークンをセッショントークンとして使われないようにする。
     if payload.get("purpose"):
         raise AuthError("token is not a session token")
-    return user_id
+    # 旧バージョン(verクレーム導入前)に発行されたトークンはver=0として扱う。
+    return user_id, int(payload.get("ver", 0))
 
 
 def create_mfa_token(user_id: str) -> str:

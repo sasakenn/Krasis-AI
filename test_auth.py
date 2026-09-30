@@ -266,7 +266,12 @@ def test_exchange_microsoft_code_for_user_raises_when_no_access_token(monkeypatc
 
 def test_create_and_decode_app_token_roundtrip():
     token = auth.create_app_token("user-42")
-    assert auth.decode_app_token(token) == "user-42"
+    assert auth.decode_app_token(token) == ("user-42", 0)
+
+
+def test_create_and_decode_app_token_roundtrip_with_version():
+    token = auth.create_app_token("user-42", token_version=3)
+    assert auth.decode_app_token(token) == ("user-42", 3)
 
 
 def test_decode_app_token_rejects_tampered_token():

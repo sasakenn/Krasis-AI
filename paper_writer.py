@@ -4,6 +4,8 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from lang_utils import fallback_answer, normalize_lang
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -12,10 +14,17 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
+# 後方互換用(既存のimport元向け)。実際の表示にはlang別のfallback_answer()を使う。
 FALLBACK_BODY = (
     "現在この機能を利用できません(APIキー未設定、または一時的なエラーです)。"
     "しばらく待ってから再試行してください。"
 )
+
+_PAPER_BODY_LANGUAGE_REQUIREMENT = {
+    "ja": "- 日本語で執筆する",
+    "en": "- Write in English",
+    "ko": "- 한국어로 작성할 것",
+}
 
 # 分量帯(outline.LENGTH_OPTIONSのkeyと対応)ごとの本文生成の出力上限。
 # 日本語は1文字あたり1トークンより多く消費しがちなので、目安の文字数より余裕を持たせる。
@@ -43,7 +52,7 @@ def _format_literature(section: dict) -> str:
     return "\n".join(lines)
 
 
-def _build_prompt(title: str, research_question: str, sections: list, target_length: str) -> str:
+def _build_prompt(title: str, research_question: str, sections: list, target_length: str, lang: str) -> str:
     section_blocks = []
     for i, section in enumerate(sections, start=1):
         section_blocks.append(
@@ -71,7 +80,7 @@ def _build_prompt(title: str, research_question: str, sections: list, target_len
 {sections_text}
 {length_block}
 要件:
-- 日本語で執筆する
+{_PAPER_BODY_LANGUAGE_REQUIREMENT[normalize_lang(lang)]}
 - 先頭にタイトルを「# タイトル」の形式で1行だけ書く
 - 各節の見出しは必ず「## 節番号. 見出し」の形式にする(例: 「## 1. 背景」)。
   番号付きの見出しを地の文として書かず、必ずこの##形式にすること
@@ -88,18 +97,21 @@ def generate_paper_body(
     research_question: str,
     sections: list,
     target_length: str = "",
+    lang: str = "ja",
 ) -> dict:
-    """調査計画(アウトライン)から、実際に読める論文の本文を生成する。
+    """調査計画(アウトライン)から、実際に読める論文の本文を生成する。langで指定した
+    言語(ja/en/ko)で執筆させる。
 
     Claudeが未設定/呼び出し失敗の場合は、その旨を伝えるフォールバック回答を返す
     (course_guide.answer_course_questionと同じ方針)。
     """
     no_usage = {"input_tokens": 0, "output_tokens": 0}
+    lang = normalize_lang(lang)
 
     if client is None:
-        return {"body": FALLBACK_BODY, "_token_usage": no_usage}
+        return {"body": fallback_answer(lang), "_token_usage": no_usage}
 
-    prompt = _build_prompt(title, research_question, sections, target_length)
+    prompt = _build_prompt(title, research_question, sections, target_length, lang)
     max_tokens = MAX_TOKENS_BY_LENGTH.get(target_length, DEFAULT_MAX_TOKENS)
 
     try:
@@ -109,7 +121,7 @@ def generate_paper_body(
             messages=[{"role": "user", "content": prompt}],
         )
         text_block = next((b for b in resp.content if b.type == "text"), None)
-        body = text_block.text.strip() if text_block else FALLBACK_BODY
+        body = text_block.text.strip() if text_block else fallback_answer(lang)
         return {
             "body": body,
             "_token_usage": {
@@ -123,4 +135,4 @@ def generate_paper_body(
             title,
             exc_info=True,
         )
-        return {"body": FALLBACK_BODY, "_token_usage": no_usage}
+        return {"body": fallback_answer(lang), "_token_usage": no_usage}

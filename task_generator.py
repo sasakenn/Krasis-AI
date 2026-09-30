@@ -22,6 +22,8 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from openpyxl import Workbook
 
+from lang_utils import fallback_answer, normalize_lang
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -30,12 +32,34 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
 client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
+# 後方互換用(既存のimport元向け)。実際の表示にはlang別のfallback_answer()を使う。
 FALLBACK_TEXT = (
     "現在この機能を利用できません(APIキー未設定、または一時的なエラーです)。"
     "しばらく待ってから再試行してください。"
 )
 
+_TASK_TEXT_REQUIREMENTS = {
+    "ja": "- 日本語で執筆する",
+    "en": "- Write in English",
+    "ko": "- 한국어로 작성할 것",
+}
+
 _INVALID_SHEET_NAME_CHARS = re.compile(r"[\\/*?:\[\]]")
+
+# openpyxlは"="で始まる文字列セルを実際のExcel数式として書き込む(+-@始まりは通常の
+# 文字列のままになることを確認済み。CSVでの挙動とは異なる)。Claudeへの指示上、
+# 集計用にSUM等の数式文字列を使わせているため、その安全な形だけを許可し、それ以外の
+# "="始まり文字列は数式インジェクション対策として先頭に"'"を付けて無害化する
+# (description=課題文はユーザー入力なので、Claudeの応答を経由した間接的な攻撃を想定)。
+_SAFE_FORMULA_PATTERN = re.compile(
+    r"^=(SUM|AVERAGE|COUNT|COUNTA|MIN|MAX)\(\$?[A-Za-z]{1,3}\$?[0-9]+(:\$?[A-Za-z]{1,3}\$?[0-9]+)?\)$"
+)
+
+
+def _sanitize_cell_value(value):
+    if isinstance(value, str) and value.startswith("=") and not _SAFE_FORMULA_PATTERN.match(value.strip()):
+        return "'" + value
+    return value
 
 
 def _parse_json_response(raw_text: str) -> dict:
@@ -45,18 +69,21 @@ def _parse_json_response(raw_text: str) -> dict:
     return json.loads(text)
 
 
-def generate_task_text(description: str) -> dict:
-    """文章で完結する課題(レポート・回答・要約など)の内容を生成する。
+def generate_task_text(description: str, lang: str = "ja") -> dict:
+    """文章で完結する課題(レポート・回答・要約など)の内容を生成する。langで指定した
+    言語(ja/en/ko)で執筆させる。
 
     Claudeが未設定/呼び出し失敗の場合は、その旨を伝えるフォールバック回答を返す
     (course_guide.answer_course_questionと同じ方針)。
     """
     no_usage = {"input_tokens": 0, "output_tokens": 0}
     clean = description.strip()
+    lang = normalize_lang(lang)
 
     if client is None:
-        return {"content": FALLBACK_TEXT, "_token_usage": no_usage}
+        return {"content": fallback_answer(lang), "_token_usage": no_usage}
 
+    language_requirement = _TASK_TEXT_REQUIREMENTS[lang]
     prompt = f"""あなたは大学生の課題作成を支援するアシスタントです。
 
 以下の課題に、実際に提出できる完成した文章で取り組んでください(構成案ではなく完成した内容にすること)。
@@ -64,7 +91,7 @@ def generate_task_text(description: str) -> dict:
 課題内容: {clean}
 
 要件:
-- 日本語で執筆する
+{language_requirement}
 - Markdown形式で、必要に応じて見出し(## )や箇条書きを使う
 - 前後に説明文やコードブロック記号は付けず、本文のみを返す"""
 
@@ -75,7 +102,7 @@ def generate_task_text(description: str) -> dict:
             messages=[{"role": "user", "content": prompt}],
         )
         text_block = next((b for b in resp.content if b.type == "text"), None)
-        content = text_block.text.strip() if text_block else FALLBACK_TEXT
+        content = text_block.text.strip() if text_block else fallback_answer(lang)
         return {
             "content": content,
             "_token_usage": {
@@ -89,10 +116,11 @@ def generate_task_text(description: str) -> dict:
             clean,
             exc_info=True,
         )
-        return {"content": FALLBACK_TEXT, "_token_usage": no_usage}
+        return {"content": fallback_answer(lang), "_token_usage": no_usage}
 
 
-def _build_spreadsheet_prompt(description: str) -> str:
+def _build_spreadsheet_prompt(description: str, lang: str) -> str:
+    language_requirement = _TASK_TEXT_REQUIREMENTS[normalize_lang(lang)]
     return f"""あなたは大学生の課題作成を支援するアシスタントで、Excel(表計算)の課題を担当します。
 
 以下の課題を満たす表を設計してください。
@@ -101,6 +129,7 @@ def _build_spreadsheet_prompt(description: str) -> str:
 
 要件:
 - JSONのみを返す(前後に説明文やコードブロック記号は付けない)
+{language_requirement}(見出し・セルの文字列に使う言語)
 - 出力形式:
 {{
   "filename": "ファイル名(拡張子なし、日本語可)",
@@ -121,39 +150,49 @@ def _build_spreadsheet_prompt(description: str) -> str:
 - 架空のデータで構わないが、課題の要件(項目数・粒度など)を満たす具体的な内容にする"""
 
 
-def _fallback_spreadsheet_spec() -> dict:
+_FALLBACK_SPREADSHEET_TEXT = {
+    "ja": {"filename": "課題", "header": "項目", "cell": "現在この機能を利用できません"},
+    "en": {"filename": "assignment", "header": "Item", "cell": "This feature is currently unavailable"},
+    "ko": {"filename": "과제", "header": "항목", "cell": "현재 이 기능을 사용할 수 없습니다"},
+}
+
+
+def _fallback_spreadsheet_spec(lang: str = "ja") -> dict:
+    text = _FALLBACK_SPREADSHEET_TEXT[normalize_lang(lang)]
     return {
-        "filename": "課題",
+        "filename": text["filename"],
         "sheets": [
             {
                 "name": "Sheet1",
-                "headers": ["項目"],
-                "rows": [["現在この機能を利用できません"]],
+                "headers": [text["header"]],
+                "rows": [[text["cell"]]],
             }
         ],
     }
 
 
-def generate_task_spreadsheet(description: str) -> dict:
-    """Excel(表計算)が必要な課題について、表の構造(spec)をJSONで生成する。
+def generate_task_spreadsheet(description: str, lang: str = "ja") -> dict:
+    """Excel(表計算)が必要な課題について、表の構造(spec)をJSONで生成する。langで
+    指定した言語(ja/en/ko)で見出し・セルの文字列を書かせる。
 
     戻り値の "spec" を build_xlsx_bytes に渡すと、実際の.xlsxバイト列になる。
     Claudeが未設定/呼び出し失敗/JSON解析失敗の場合は、フォールバックの spec を返す。
     """
     no_usage = {"input_tokens": 0, "output_tokens": 0}
     clean = description.strip()
+    lang = normalize_lang(lang)
 
     if client is None:
-        return {"spec": _fallback_spreadsheet_spec(), "_token_usage": no_usage}
+        return {"spec": _fallback_spreadsheet_spec(lang), "_token_usage": no_usage}
 
     try:
         resp = client.messages.create(
             model=MODEL,
             max_tokens=4000,
-            messages=[{"role": "user", "content": _build_spreadsheet_prompt(clean)}],
+            messages=[{"role": "user", "content": _build_spreadsheet_prompt(clean, lang)}],
         )
         text_block = next((b for b in resp.content if b.type == "text"), None)
-        spec = _parse_json_response(text_block.text) if text_block else _fallback_spreadsheet_spec()
+        spec = _parse_json_response(text_block.text) if text_block else _fallback_spreadsheet_spec(lang)
         return {
             "spec": spec,
             "_token_usage": {
@@ -167,7 +206,7 @@ def generate_task_spreadsheet(description: str) -> dict:
             clean,
             exc_info=True,
         )
-        return {"spec": _fallback_spreadsheet_spec(), "_token_usage": no_usage}
+        return {"spec": _fallback_spreadsheet_spec(lang), "_token_usage": no_usage}
 
 
 def _sanitize_sheet_name(name: str, fallback: str) -> str:
@@ -187,10 +226,10 @@ def build_xlsx_bytes(spec: dict) -> bytes:
 
         headers = sheet_spec.get("headers") or []
         if headers:
-            worksheet.append(headers)
+            worksheet.append([_sanitize_cell_value(v) for v in headers])
 
         for row in sheet_spec.get("rows") or []:
-            worksheet.append(row)
+            worksheet.append([_sanitize_cell_value(v) for v in row])
 
     if not workbook.sheetnames:
         workbook.create_sheet(title="Sheet1")

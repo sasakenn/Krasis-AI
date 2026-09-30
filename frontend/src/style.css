@@ -351,6 +351,13 @@ body {
   font: 400 10px/1 var(--font-mono);
   color: var(--text-faint);
 }
+.mode-section-label {
+  margin: 14px 10px 4px;
+  font: 600 10px/1.4 var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
 
 /* --- Course guide picker (university / faculty / department) --- */
 .course-picker {
@@ -673,6 +680,15 @@ body {
 .message-user .message-author { color: var(--accent-blue); }
 .message-assistant .message-author { color: var(--accent-green); }
 .message-body p { margin: 0 0 6px; white-space: pre-wrap; color: var(--text-primary); }
+.message-body h3, .message-body h4 {
+  font-family: var(--font-serif);
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 14px 0 6px;
+}
+.message-body h3:first-child, .message-body h4:first-child { margin-top: 0; }
+.message-body h3 { font-size: 17px; }
+.message-body h4 { font-size: 14.5px; }
 .message-tag {
   display: inline-block;
   font: 400 11px/1 var(--font-mono);
@@ -775,8 +791,8 @@ body {
   padding: 16px 18px;
   margin-bottom: 12px;
 }
-.paper-body h3 { margin: 0 0 12px; font-size: 17px; color: var(--text-primary); }
-.paper-body h4 { margin: 16px 0 6px; font-size: 14px; color: var(--text-primary); }
+.paper-body h3 { margin: 0 0 12px; font: 700 17px var(--font-serif); color: var(--text-primary); }
+.paper-body h4 { margin: 16px 0 6px; font: 700 14px var(--font-serif); color: var(--text-primary); }
 .paper-body h3:first-child, .paper-body h4:first-child { margin-top: 0; }
 .paper-body p { margin: 0 0 10px; font-size: 14px; line-height: 1.7; color: var(--text-primary); white-space: pre-wrap; }
 
@@ -805,9 +821,71 @@ body {
   border-color: var(--accent-blue);
   color: var(--accent-blue);
 }
+/* .chosenだが(複数選択の途中確定などで)まだdisabledでないボタンにマウスが乗っても、
+   選択状態が:hover:not(:disabled)の背景色に上書きされて見えなくならないようにする。 */
+.length-option.chosen:hover {
+  background: rgba(31, 59, 174, 0.16);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
 .length-option:disabled:not(.chosen) {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* --- AI agents profile wizard (ai-agents tab) --- */
+/* プロフィール設定中は、質問1問を画面いっぱいに使って表示する。 */
+.ai-agents-fullscreen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 40px 24px;
+  text-align: center;
+}
+.ai-agents-fullscreen-progress {
+  font: 600 12px/1 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.ai-agents-fullscreen-question {
+  margin: 0;
+  max-width: 640px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+.ai-agents-fullscreen-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  max-width: 680px;
+}
+.ai-agents-fullscreen-options .length-option {
+  font-size: 15px;
+  padding: 11px 22px;
+}
+.ai-agents-fullscreen .wizard-confirm {
+  margin-top: 4px;
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.wizard-reset {
+  margin-top: 4px;
+}
+.wizard-reminder {
+  margin: 0 24px 14px;
+}
+.ai-agents-summary {
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 .composer-hint {
@@ -1045,6 +1123,34 @@ body {
   font-size: 13px;
   color: var(--text-secondary);
 }
+
+/* --- Language switcher (login screen + sidebar settings) --- */
+.language-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--border-light);
+  border-radius: 999px;
+  background: var(--bg-panel-hover);
+}
+.language-switcher-option {
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.language-switcher-option:hover { color: var(--text-primary); }
+.language-switcher-option.active {
+  background: var(--bg-panel);
+  color: var(--accent-blue);
+  box-shadow: 0 1px 2px rgba(var(--ink-rgb), 0.08);
+}
+.login-language-switcher { margin-top: -2px; }
+.sidebar-language-switcher { align-self: stretch; justify-content: center; margin-top: 4px; }
 .login-options {
   width: 100%;
   display: flex;
@@ -2009,6 +2115,7 @@ body {
 }
 .admin-login-logs-date { white-space: nowrap; color: var(--text-muted); }
 .admin-login-logs-subject { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.admin-login-logs-email { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-login-logs-ua { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .admin-login-logs-empty { text-align: center; color: var(--text-faint); padding: 20px 0; }
 

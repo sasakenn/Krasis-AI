@@ -132,7 +132,7 @@ def test_generate_requires_topic():
 def test_generate_passes_reference_and_format_notes_and_length_to_prompt():
     captured = {}
 
-    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length=""):
+    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
         captured["reference_notes"] = reference_notes
         captured["format_notes"] = format_notes
         captured["target_length"] = target_length
@@ -171,7 +171,7 @@ def test_generate_rejects_oversized_reference_file(monkeypatch):
 def test_generate_notes_unsupported_files_by_name_only():
     captured = {}
 
-    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length=""):
+    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
         captured["reference_notes"] = reference_notes
         return {"title": "t", "research_question": "q", "sections": []}
 
@@ -191,7 +191,7 @@ def test_generate_extracts_pdf_text():
     captured = {}
     pdf_bytes = _build_minimal_pdf("Reference material about generative AI")
 
-    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length=""):
+    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
         captured["reference_notes"] = reference_notes
         return {"title": "t", "research_question": "q", "sections": []}
 
@@ -211,7 +211,7 @@ def test_generate_extracts_docx_text():
     captured = {}
     docx_bytes = _build_minimal_docx("Use APA 7th edition style with 6 sections")
 
-    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length=""):
+    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
         captured["format_notes"] = format_notes
         return {"title": "t", "research_question": "q", "sections": []}
 
@@ -295,6 +295,27 @@ def test_history_search_filters_by_topic_and_title():
     items = resp.json()["items"]
     assert len(items) >= 1
     assert all("検索対象トピックabc123" in item["topic"] for item in items)
+
+
+def test_history_limit_is_clamped_and_rejects_sqlite_unlimited_trick():
+    """limitに上限を設けないと、負の値(SQLiteでのLIMIT -1=無制限)や巨大な値で
+    大量取得させられてしまう回帰テスト。DBへ渡る前にHISTORY_PAGE_SIZE_MAXへ
+    クランプされることを確認する。
+    """
+    captured = {}
+
+    def _fake_list_generations(user_id, limit=50, q=None, only_private=False):
+        captured["limit"] = limit
+        return []
+
+    with patch("app.list_generations", side_effect=_fake_list_generations):
+        resp = client.get("/history", params={"limit": -1})
+        assert resp.status_code == 200
+        assert captured["limit"] == 1  # max(1, min(-1, MAX)) == 1
+
+        resp2 = client.get("/history", params={"limit": 999999999})
+        assert resp2.status_code == 200
+        assert captured["limit"] == app_module.HISTORY_PAGE_SIZE_MAX
 
 
 def test_private_generation_is_hidden_from_default_history_but_visible_in_private_scope():
@@ -409,6 +430,37 @@ def test_dev_bypass_is_hard_disabled_in_production_even_if_misconfigured(monkeyp
     monkeypatch.setattr(app_module, "IS_PRODUCTION", True)
 
     resp = client.get("/history", headers={"X-Dev-User-Id": "someone"})
+    assert resp.status_code == 401
+
+    dev_login = client.post("/auth/dev")
+    assert dev_login.status_code == 404
+
+
+class _FakeClient:
+    def __init__(self, host):
+        self.host = host
+
+
+class _FakeRequest:
+    def __init__(self, host):
+        self.client = _FakeClient(host) if host is not None else None
+
+
+def test_is_same_machine_request_allows_only_loopback_and_testclient():
+    assert app_module._is_same_machine_request(_FakeRequest("127.0.0.1")) is True
+    assert app_module._is_same_machine_request(_FakeRequest("::1")) is True
+    assert app_module._is_same_machine_request(_FakeRequest("testclient")) is True
+
+    assert app_module._is_same_machine_request(_FakeRequest("192.168.1.42")) is False
+    assert app_module._is_same_machine_request(_FakeRequest(None)) is False
+
+
+def test_dev_bypass_is_blocked_from_a_different_machine(monkeypatch):
+    """X-Dev-User-Idヘッダーと/auth/devは、このMac自身(ループバック)からのアクセス
+    でなければ、同じLAN上の他端末からでも使えないことの回帰テスト。"""
+    monkeypatch.setattr(app_module, "_is_same_machine_request", lambda request: False)
+
+    resp = client.get("/history", headers={"X-Dev-User-Id": DEFAULT_TEST_USER_ID})
     assert resp.status_code == 401
 
     dev_login = client.post("/auth/dev")
@@ -631,6 +683,20 @@ def test_admin_logins_records_and_lists_login_success_across_providers():
     assert item["user_agent"] == "pytest-agent"
 
 
+def test_admin_logins_resolves_subject_email_for_user_id_and_raw_email_subjects():
+    import db
+
+    db.upsert_user("google:email-lookup-user", "lookup-target@example.com")
+    db.record_security_event("login_success", "google:email-lookup-user", "Google")
+    db.record_security_event("login_failed", "lookup-target@example.com", "コード不一致")
+
+    by_user_id = client.get("/admin/logins", params={"q": "email-lookup-user"}).json()["items"]
+    assert any(i["subject"] == "google:email-lookup-user" and i["subject_email"] == "lookup-target@example.com" for i in by_user_id)
+
+    by_email = client.get("/admin/logins", params={"q": "lookup-target@example.com"}).json()["items"]
+    assert any(i["subject"] == "lookup-target@example.com" and i["subject_email"] == "lookup-target@example.com" for i in by_email)
+
+
 def test_admin_logins_filters_by_event_type():
     import db
 
@@ -721,7 +787,7 @@ def test_users_cannot_see_or_modify_each_others_data():
     assert client.get("/sessions").json()["items"]
 
 
-def _fake_generate_outline_minimal(topic, field, reference_notes="", format_notes="", target_length=""):
+def _fake_generate_outline_minimal(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
     return {"title": "t", "research_question": "q", "sections": []}
 
 
@@ -750,7 +816,7 @@ def test_generate_rate_limit_disabled_when_zero(monkeypatch):
 def test_generate_handles_corrupted_pdf_gracefully():
     captured = {}
 
-    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length=""):
+    def _fake_generate_outline(topic, field, reference_notes="", format_notes="", target_length="", lang="ja"):
         captured["reference_notes"] = reference_notes
         return {"title": "t", "research_question": "q", "sections": []}
 
@@ -766,7 +832,7 @@ def test_generate_handles_corrupted_pdf_gracefully():
     assert "PDFの読み取りに失敗しました" in captured["reference_notes"]
 
 
-def _fake_answer_course_question(university, faculty, department, messages):
+def _fake_answer_course_question(university, faculty, department, messages, lang="ja"):
     return {
         "answer": f"{university}{faculty}についての回答です。",
         "_token_usage": {"input_tokens": 10, "output_tokens": 20},
@@ -877,7 +943,214 @@ def test_course_chat_rate_limit_returns_429_when_exceeded(monkeypatch):
         assert second.status_code == 429
 
 
-def _fake_generate_paper_body(title, research_question, sections, target_length=""):
+def _fake_answer_finance_economics_question(level, role, purpose, categories, regions, messages, lang="ja"):
+    return {
+        "answer": f"{'+'.join(categories)}/{','.join(regions.values())}についての解説です。",
+        "_token_usage": {"input_tokens": 10, "output_tokens": 20},
+    }
+
+
+_AI_AGENTS_BASE_PAYLOAD = {
+    "level": "beginner",
+    "role": "student",
+    "purpose": "毎日のニュース把握",
+    "categories": ["economics"],
+    "regions": {"economics": "japan"},
+}
+
+_AI_AGENTS_BOTH_PAYLOAD = {
+    "level": "beginner",
+    "role": "student",
+    "purpose": "毎日のニュース把握",
+    "categories": ["economics", "finance"],
+    "regions": {"economics": "japan", "finance": "japan-stocks"},
+}
+
+
+def test_ai_agents_chat_returns_answer():
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+        resp = client.post(
+            "/ai-agents-chat",
+            json={
+                **_AI_AGENTS_BASE_PAYLOAD,
+                "messages": [{"role": "user", "content": "現在の状況を教えて"}],
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"] == "economics/japanについての解説です。"
+    assert "_token_usage" not in body
+
+
+def test_ai_agents_chat_supports_selecting_both_categories():
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+        resp = client.post(
+            "/ai-agents-chat",
+            json={
+                **_AI_AGENTS_BOTH_PAYLOAD,
+                "messages": [{"role": "user", "content": "現在の状況を教えて"}],
+            },
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["answer"] == "economics+finance/japan,japan-stocksについての解説です。"
+
+
+def test_ai_agents_chat_rejects_invalid_level():
+    resp = client.post(
+        "/ai-agents-chat",
+        json={
+            **_AI_AGENTS_BASE_PAYLOAD,
+            "level": "expert",
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_ai_agents_chat_rejects_invalid_category():
+    resp = client.post(
+        "/ai-agents-chat",
+        json={
+            **_AI_AGENTS_BASE_PAYLOAD,
+            "categories": ["sports"],
+            "regions": {"sports": "japan"},
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_ai_agents_chat_rejects_region_not_valid_for_category():
+    resp = client.post(
+        "/ai-agents-chat",
+        json={
+            **_AI_AGENTS_BASE_PAYLOAD,
+            "categories": ["economics"],
+            "regions": {"economics": "japan-stocks"},
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+    )
+    assert resp.status_code == 400
+
+
+def test_ai_agents_chat_requires_messages():
+    resp = client.post(
+        "/ai-agents-chat",
+        json={**_AI_AGENTS_BASE_PAYLOAD, "messages": []},
+    )
+    assert resp.status_code == 400
+
+
+def test_ai_agents_chat_blocked_with_402_when_quota_exceeded(monkeypatch):
+    import db
+
+    other_user_headers = {"X-Dev-User-Id": "ai-agents-chat-quota-test-user"}
+    monkeypatch.setattr(app_module, "PLAN_TOKEN_QUOTAS", {"free": 10, "pro": 200_000, "max": 1_000_000})
+    db.add_token_usage("ai-agents-chat-quota-test-user", 999)
+
+    resp = client.post(
+        "/ai-agents-chat",
+        json={
+            **_AI_AGENTS_BASE_PAYLOAD,
+            "messages": [{"role": "user", "content": "質問です"}],
+        },
+        headers=other_user_headers,
+    )
+    assert resp.status_code == 402
+
+
+def test_ai_agents_chat_increments_usage():
+    import db
+
+    headers = {"X-Dev-User-Id": "ai-agents-chat-usage-tracking-user"}
+    before = db.get_or_create_entitlement("ai-agents-chat-usage-tracking-user")["tokens_used"]
+
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+        resp = client.post(
+            "/ai-agents-chat",
+            json={
+                **_AI_AGENTS_BASE_PAYLOAD,
+                "messages": [{"role": "user", "content": "質問です"}],
+            },
+            headers=headers,
+        )
+    assert resp.status_code == 200
+
+    after = db.get_or_create_entitlement("ai-agents-chat-usage-tracking-user")["tokens_used"]
+    assert after == before + 30
+
+
+def test_ai_agents_chat_rate_limit_returns_429_when_exceeded(monkeypatch):
+    monkeypatch.setattr(app_module, "AI_AGENTS_CHAT_RATE_LIMIT_PER_MINUTE", 1)
+
+    with patch("app.answer_finance_economics_question", side_effect=_fake_answer_finance_economics_question):
+        first = client.post(
+            "/ai-agents-chat",
+            json={**_AI_AGENTS_BASE_PAYLOAD, "messages": [{"role": "user", "content": "1回目"}]},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/ai-agents-chat",
+            json={**_AI_AGENTS_BASE_PAYLOAD, "messages": [{"role": "user", "content": "2回目"}]},
+        )
+        assert second.status_code == 429
+
+
+def test_ai_agents_subscription_status_defaults_to_disabled():
+    headers = {"X-Dev-User-Id": "ai-agents-subscription-default-user"}
+    resp = client.get("/ai-agents-subscription", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": False, "profile": None}
+
+
+def test_ai_agents_subscription_requires_email_to_enable():
+    headers = {"X-Dev-User-Id": "ai-agents-subscription-no-email-user"}
+    resp = client.post("/ai-agents-subscription", json={**_AI_AGENTS_BASE_PAYLOAD, "enabled": True}, headers=headers)
+    assert resp.status_code == 400
+
+
+def test_ai_agents_subscription_enables_and_persists_with_email(monkeypatch):
+    import db
+
+    user_id = "ai-agents-subscription-with-email-user"
+    headers = {"X-Dev-User-Id": user_id}
+    db.upsert_user(user_id, "subscriber@example.com")
+
+    resp = client.post("/ai-agents-subscription", json={**_AI_AGENTS_BOTH_PAYLOAD, "enabled": True}, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"enabled": True}
+
+    status = client.get("/ai-agents-subscription", headers=headers)
+    assert status.status_code == 200
+    body = status.json()
+    assert body["enabled"] is True
+    assert body["profile"]["categories"] == ["economics", "finance"]
+
+    # 無効化(オフ)も同じエンドポイントで行える。
+    resp = client.post(
+        "/ai-agents-subscription",
+        json={**_AI_AGENTS_BOTH_PAYLOAD, "enabled": False},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert client.get("/ai-agents-subscription", headers=headers).json()["enabled"] is False
+
+
+def test_ai_agents_subscription_rejects_invalid_profile():
+    headers = {"X-Dev-User-Id": "ai-agents-subscription-invalid-user"}
+    resp = client.post(
+        "/ai-agents-subscription",
+        json={**_AI_AGENTS_BASE_PAYLOAD, "enabled": False, "level": "expert"},
+        headers=headers,
+    )
+    assert resp.status_code == 400
+
+
+def _fake_generate_paper_body(title, research_question, sections, target_length="", lang="ja"):
     return {
         "body": f"# {title}\n\n本文です。",
         "_token_usage": {"input_tokens": 15, "output_tokens": 25},
@@ -970,7 +1243,7 @@ def test_generate_body_shares_rate_limit_with_generate(monkeypatch):
         assert second.status_code == 429
 
 
-def _fake_generate_study_notes(document_text, focus=""):
+def _fake_generate_study_notes(document_text, focus="", lang="ja"):
     return {
         "content": f"## 全体の要約\n{document_text[:20]}についての要約です。",
         "_token_usage": {"input_tokens": 15, "output_tokens": 25},
@@ -995,9 +1268,9 @@ def test_study_notes_requires_text_or_file():
 def test_study_notes_reads_uploaded_text_file():
     captured = {}
 
-    def _capture(document_text, focus=""):
+    def _capture(document_text, focus="", lang="ja"):
         captured["document_text"] = document_text
-        return _fake_generate_study_notes(document_text, focus)
+        return _fake_generate_study_notes(document_text, focus, lang)
 
     with patch("app.generate_study_notes", side_effect=_capture):
         resp = client.post(

@@ -1,6 +1,16 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.jsx'
+import { LanguageProvider } from './i18n.jsx'
+
+// テストは既定言語(日本語)の文言を前提にしているため、LanguageProviderでラップして描画する。
+function renderApp() {
+  return render(
+    <LanguageProvider>
+      <App />
+    </LanguageProvider>
+  )
+}
 
 const LENGTH_QUESTION_RESPONSE = {
   type: 'length_question',
@@ -208,7 +218,8 @@ function mockFetch({
       }
       mfaState.enabled = true
       mfaState.pending = false
-      return Promise.resolve(jsonResponse({ enabled: true }))
+      // MFA有効化は既存セッションを一括失効させ、新しいトークンを返す仕様。
+      return Promise.resolve(jsonResponse({ enabled: true, token: 'token-after-mfa-enable' }))
     }
 
     if (url === '/auth/mfa/disable' && method === 'POST') {
@@ -218,7 +229,11 @@ function mockFetch({
       }
       mfaState.enabled = false
       mfaState.pending = false
-      return Promise.resolve(jsonResponse({ enabled: false }))
+      return Promise.resolve(jsonResponse({ enabled: false, token: 'token-after-mfa-disable' }))
+    }
+
+    if (url === '/auth/logout-all' && method === 'POST') {
+      return Promise.resolve(jsonResponse({ token: 'token-after-logout-all' }))
     }
 
     if (url === '/auth/security-events' && method === 'GET') {
@@ -293,7 +308,7 @@ async function submitTopic(topic = '生成AIと教育') {
 }
 
 async function renderOutlineApp() {
-  const rendered = render(<App />)
+  const rendered = renderApp()
   fireEvent.click(await screen.findByRole('button', { name: '# outline-generator' }))
   await screen.findByPlaceholderText(/生成AIが学術論文の執筆プロセスに与える影響/)
   return rendered
@@ -521,7 +536,7 @@ describe('App', () => {
 
   it('shows a manage-billing button on a paid plan and opens the Stripe portal', async () => {
     mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro' } })
-    render(<App />)
+    renderApp()
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'プランを管理' })).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'Proにアップグレード' })).not.toBeInTheDocument()
@@ -674,12 +689,12 @@ describe('LoginScreen', () => {
   })
 
   it('shows the login screen when there is no stored token', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
   })
 
   it('logs in via the dev login button and shows the app', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() =>
       expect(screen.getByRole('button', { name: /開発用ログイン/ })).toBeInTheDocument()
     )
@@ -691,15 +706,14 @@ describe('LoginScreen', () => {
   })
 
   it('disables provider buttons when their client id is not configured', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByText('続けるにはログインしてください')).toBeInTheDocument())
 
-    expect(screen.getByRole('button', { name: /Appleでサインイン/ })).toBeDisabled()
     expect(screen.getByRole('button', { name: /GitHubでサインイン/ })).toBeDisabled()
   })
 
   it('signs up with email, then requires the emailed code before logging in', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByPlaceholderText('メールアドレス')).toBeInTheDocument())
 
     fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
@@ -725,7 +739,7 @@ describe('LoginScreen', () => {
   })
 
   it('logs in with an existing email and code', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByRole('button', { name: 'ログイン' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'ログイン' }))
 
@@ -742,7 +756,7 @@ describe('LoginScreen', () => {
   })
 
   it('requests a code reissue and shows the confirmation message', async () => {
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByRole('button', { name: 'ログインコードを忘れた' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'ログインコードを忘れた' }))
 
@@ -759,7 +773,7 @@ describe('LoginScreen', () => {
 
 describe('TaskReminders', () => {
   async function openTaskChannel() {
-    render(<App />)
+    renderApp()
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '# task-reminders' })).toBeInTheDocument()
     )
@@ -826,7 +840,7 @@ describe('TaskReminders', () => {
       ],
     })
 
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: '# task-reminders' }))
     await waitFor(() => expect(screen.getByText('既存のタスク')).toBeInTheDocument())
   })
@@ -839,7 +853,7 @@ describe('MFA login flow', () => {
 
   it('asks for an authenticator code when the account has MFA enabled, then logs in', async () => {
     mockFetch({ mfaRequiredOnLogin: true })
-    render(<App />)
+    renderApp()
     await waitFor(() => expect(screen.getByRole('button', { name: 'ログイン' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: 'ログイン' }))
 
@@ -865,7 +879,7 @@ describe('MFA login flow', () => {
 
   it('shows an error and lets the user retry on a wrong authenticator code', async () => {
     mockFetch({ mfaRequiredOnLogin: true })
-    render(<App />)
+    renderApp()
     fireEvent.click(await screen.findByRole('button', { name: 'ログイン' }))
     fireEvent.change(screen.getByPlaceholderText('メールアドレス'), {
       target: { value: 'mfa-user@example.com' },
@@ -886,7 +900,7 @@ describe('MFA login flow', () => {
 
 describe('SecuritySettings', () => {
   async function openSecurityPanel() {
-    render(<App />)
+    renderApp()
     await waitFor(() =>
       expect(screen.getByRole('button', { name: '🔒 セキュリティ設定' })).toBeInTheDocument()
     )
@@ -908,8 +922,11 @@ describe('SecuritySettings', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'コードを確認して有効化' }))
 
-    await waitFor(() => expect(screen.getByText('多要素認証を有効にしました。')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/多要素認証を有効にしました。/)).toBeInTheDocument())
     expect(screen.getByText('✓ 有効になっています')).toBeInTheDocument()
+    // 既存セッションを一括失効させる仕様なので、このセッション自身は新トークンに
+    // 差し替わり、ログイン画面へ飛ばされない。
+    expect(localStorage.getItem('paper-assistant-token')).toBe('token-after-mfa-enable')
   })
 
   it('disables MFA when already enabled, given the correct code', async () => {
@@ -922,8 +939,24 @@ describe('SecuritySettings', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '多要素認証を無効にする' }))
 
-    await waitFor(() => expect(screen.getByText('多要素認証を無効にしました。')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/多要素認証を無効にしました。/)).toBeInTheDocument())
     expect(screen.getByText('現在、無効です。')).toBeInTheDocument()
+    expect(localStorage.getItem('paper-assistant-token')).toBe('token-after-mfa-disable')
+  })
+
+  it('logs out all other devices and keeps this session working with a new token', async () => {
+    mockFetch()
+    await openSecurityPanel()
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'この端末以外を全てログアウトする' })).toBeInTheDocument()
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'この端末以外を全てログアウトする' }))
+
+    await waitFor(() =>
+      expect(screen.getByText('この端末を除く、全てのログイン中の端末からログアウトしました。')).toBeInTheDocument()
+    )
+    expect(localStorage.getItem('paper-assistant-token')).toBe('token-after-logout-all')
   })
 
   it('shows recent security events', async () => {

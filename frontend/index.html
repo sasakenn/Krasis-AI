@@ -12,14 +12,25 @@
       href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@400;600;700&family=Noto+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <!-- Sign in with Apple / Googleでのサインインに使うJS SDK。クライアントID未設定時は
-         そもそもボタンが無効化されるので、読み込めなくても本体の動作には影響しない。 -->
-    <script async src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
+    <!-- Googleでのサインインに使うJS SDK。クライアントID未設定時はそもそもボタンが
+         無効化されるので、読み込めなくても本体の動作には影響しない。 -->
     <script async src="https://accounts.google.com/gsi/client"></script>
     <!-- 起動演出: 深いダーク背景の上を、白から金へ抜けるグラデーションの細い光の筋が
          斜めに静かに流れるだけ。丸い光の点滅などは付けず、そのままフェードで本体へ引き渡す。
-         style.css(バンドル)を待たずに出したいのでここにインラインで定義する。 -->
+         style.css(バンドル)を待たずに出したいのでここにインラインで定義する。
+
+         html/bodyの背景も、本体のCSS(style.css)が読み込まれるより前から
+         アプリと同じ色にしておく。これが無いと、読み込みが遅い回線などで
+         演出の固定タイマーが先に終わってしまった場合に、ブラウザ既定の
+         白背景がむき出しになる(「起動演出の後に白塗りになる」バグの原因)。 -->
     <style>
+      html, body {
+        background: #F6F4EF;
+      }
+      @media (prefers-color-scheme: dark) {
+        html, body { background: #121314; }
+      }
+
       #intro-splash {
         position: fixed;
         inset: 0;
@@ -27,7 +38,14 @@
         overflow: hidden;
         background: #08090b;
         pointer-events: none;
-        animation: intro-splash-hide 1.75s cubic-bezier(.4, 0, .2, 1) forwards;
+        opacity: 1;
+        transition: opacity .55s cubic-bezier(.4, 0, .2, 1);
+      }
+      /* 固定時間で消すのではなく、後述のスクリプトがアプリの起動完了を検知してから
+         このクラスを付与する(=最低表示時間とアプリの実際の準備完了の両方を待つ)。 */
+      #intro-splash.intro-splash-hidden {
+        opacity: 0;
+        visibility: hidden;
       }
 
       .intro-streak {
@@ -51,11 +69,6 @@
         18%  { opacity: 1; }
         68%  { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(8vmin); opacity: 1; }
         100% { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(30vmin); opacity: 0; }
-      }
-
-      @keyframes intro-splash-hide {
-        0%, 76% { opacity: 1; visibility: visible; }
-        100% { opacity: 0; visibility: hidden; }
       }
 
       #intro-logo-wrap {
@@ -93,7 +106,7 @@
       }
 
       @media (prefers-reduced-motion: reduce) {
-        #intro-splash { animation-duration: .3s; }
+        #intro-splash { transition-duration: .15s; }
         .intro-streak { animation-duration: .2s; animation-delay: 0s; }
         #intro-logo { animation-duration: .2s; animation-delay: 0s; }
       }
@@ -113,6 +126,51 @@
       </div>
     </div>
     <div id="root"></div>
+    <!-- 起動演出を「固定1.75秒で消す」のではなく、(a)最低表示時間 と
+         (b)アプリが実際にroot配下へ描画完了したこと の両方を待って消す。
+         こうしないと、読み込みが遅い回線・端末では演出のほうが先に終わってしまい、
+         本体はまだ真っ白(スタイル未適用)のまま、というバグ("起動演出の後に
+         白塗りになる")が起きる。MAX_MSは、万一アプリの起動に失敗した場合でも
+         演出が消えないまま残り続けないための安全装置。
+         type="module"のスクリプト(main.jsx)はdocument parse後まで実行が
+         遅延されるので、このスクリプトを先に置いておけばMutationObserverの
+         登録がroot描画より必ず先に間に合う。 -->
+    <script>
+      (function () {
+        var splash = document.getElementById('intro-splash');
+        var root = document.getElementById('root');
+        if (!splash || !root) return;
+
+        var reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var MIN_MS = reduceMotion ? 150 : 1750;
+        var MAX_MS = 6000;
+        var minTimeElapsed = false;
+        var appReady = false;
+        var hidden = false;
+
+        function hide() {
+          if (hidden) return;
+          hidden = true;
+          splash.classList.add('intro-splash-hidden');
+        }
+
+        function tryHide() {
+          if (minTimeElapsed && appReady) hide();
+        }
+
+        setTimeout(function () { minTimeElapsed = true; tryHide(); }, MIN_MS);
+        setTimeout(hide, MAX_MS);
+
+        var observer = new MutationObserver(function () {
+          if (root.childElementCount > 0) {
+            appReady = true;
+            observer.disconnect();
+            tryHide();
+          }
+        });
+        observer.observe(root, { childList: true });
+      })();
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

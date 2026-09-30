@@ -16,6 +16,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
+import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
 // アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
@@ -166,20 +167,32 @@ async function readErrorMessage(resp) {
   } catch {
     // JSON以外のレスポンス(素のテキストやHTML)はそのまま使う
   }
-  return raw || `リクエストに失敗しました(status ${resp.status})`
+  const genericMessages = {
+    ja: `リクエストに失敗しました(status ${resp.status})`,
+    en: `Request failed (status ${resp.status})`,
+    ko: `요청에 실패했습니다(status ${resp.status})`,
+  }
+  return raw || genericMessages[getStoredLanguage()] || genericMessages.ja
+}
+
+const _MARKDOWN_EXPORT_LABELS = {
+  ja: { question: '中心の問い', searchQuery: '検索キーワード', literature: '関連文献:', unknownAuthor: '著者不明' },
+  en: { question: 'Central question', searchQuery: 'Search keywords', literature: 'Related literature:', unknownAuthor: 'Unknown author' },
+  ko: { question: '핵심 질문', searchQuery: '검색 키워드', literature: '관련 문헌:', unknownAuthor: '저자 미상' },
 }
 
 function outlineToMarkdown(outline) {
-  const lines = [`# ${outline.title}`, '', `**中心の問い**: ${outline.research_question}`, '']
+  const l = _MARKDOWN_EXPORT_LABELS[getStoredLanguage()] || _MARKDOWN_EXPORT_LABELS.ja
+  const lines = [`# ${outline.title}`, '', `**${l.question}**: ${outline.research_question}`, '']
 
   outline.sections.forEach((section, i) => {
     lines.push(`## ${i + 1}. ${section.heading}`, '', section.purpose, '')
-    lines.push(`検索キーワード: \`${section.search_query}\``, '')
+    lines.push(`${l.searchQuery}: \`${section.search_query}\``, '')
 
     if (section.literature && section.literature.length > 0) {
-      lines.push('関連文献:')
+      lines.push(l.literature)
       section.literature.forEach((paper) => {
-        const authors = paper.authors && paper.authors.length > 0 ? paper.authors.join(', ') : '著者不明'
+        const authors = paper.authors && paper.authors.length > 0 ? paper.authors.join(', ') : l.unknownAuthor
         const year = paper.year ? ` (${paper.year})` : ''
         lines.push(`- [${paper.title}](${paper.url}) — ${authors}${year}`)
       })
@@ -206,6 +219,7 @@ function downloadMarkdown(outline) {
 }
 
 function OutlineResult({ outline, onUpdateOutline, idPrefix = 'section' }) {
+  const { lang } = useLanguage()
   const [bodyLoading, setBodyLoading] = useState(false)
   const [bodyError, setBodyError] = useState(null)
 
@@ -220,6 +234,7 @@ function OutlineResult({ outline, onUpdateOutline, idPrefix = 'section' }) {
           title: outline.title,
           research_question: outline.research_question,
           sections: outline.sections,
+          lang,
         }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
@@ -328,8 +343,29 @@ function LengthQuestion({ question, onChoose }) {
   )
 }
 
+// 日本語・英語・韓国語を切り替える共通スイッチャー。ログイン画面とログイン後の
+// サイドバー設定の両方から使う(切り替えはlocalStorageに保存され、アプリ全体・
+// AIの回答言語にも反映される)。
+function LanguageSwitcher({ className = '' }) {
+  const { lang, setLang } = useLanguage()
+  return (
+    <div className={`language-switcher ${className}`}>
+      {LANGUAGES.map((l) => (
+        <button
+          key={l.code}
+          type="button"
+          className={`language-switcher-option ${lang === l.code ? 'active' : ''}`}
+          onClick={() => setLang(l.code)}
+        >
+          {l.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function LoginScreen({ onToken, initialMfaToken }) {
-  const appleClientId = import.meta.env.VITE_APPLE_CLIENT_ID
+  const { t } = useLanguage()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
   const githubRedirectUri = import.meta.env.VITE_GITHUB_REDIRECT_URI || window.location.origin
@@ -454,16 +490,6 @@ function LoginScreen({ onToken, initialMfaToken }) {
   }
 
   useEffect(() => {
-    if (!appleClientId || !window.AppleID) return
-    window.AppleID.auth.init({
-      clientId: appleClientId,
-      scope: 'email',
-      redirectURI: window.location.origin,
-      usePopup: true,
-    })
-  }, [appleClientId])
-
-  useEffect(() => {
     if (!googleClientId || !window.google) return
     window.google.accounts.id.initialize({
       client_id: googleClientId,
@@ -492,27 +518,6 @@ function LoginScreen({ onToken, initialMfaToken }) {
       window.google.accounts.id.renderButton(container, { theme: 'filled_black', size: 'large', width: 260 })
     }
   }, [googleClientId, onToken])
-
-  async function handleAppleSignIn() {
-    setError(null)
-    try {
-      const result = await window.AppleID.auth.signIn()
-      const resp = await fetch(`${API_ORIGIN}/auth/apple`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identity_token: result.authorization.id_token }),
-      })
-      if (!resp.ok) throw new Error(await readErrorMessage(resp))
-      const data = await resp.json()
-      if (data.mfa_required) {
-        setMfaToken(data.mfa_token)
-      } else {
-        onToken(data.token)
-      }
-    } catch (err) {
-      setError(String(err))
-    }
-  }
 
   function handleGitHubSignIn() {
     const params = new URLSearchParams({
@@ -556,7 +561,8 @@ function LoginScreen({ onToken, initialMfaToken }) {
       <div className="app-root login-screen">
         <div className="login-card">
           <BrandLockup className="sidebar-brand" />
-          <p className="login-subtitle">認証アプリに表示されている6桁のコードを入力してください</p>
+          <LanguageSwitcher className="login-language-switcher" />
+          <p className="login-subtitle">{t('login.mfaSubtitle')}</p>
 
           <form className="code-auth-form" onSubmit={handleMfaVerify}>
             <input
@@ -564,23 +570,23 @@ function LoginScreen({ onToken, initialMfaToken }) {
               required
               inputMode="numeric"
               autoFocus
-              placeholder="6桁のコード"
+              placeholder={t('login.mfaPlaceholder')}
               value={mfaCode}
               onChange={(e) => setMfaCode(e.target.value)}
             />
             <button type="submit" className="login-button" disabled={mfaLoading}>
-              {mfaLoading ? '確認中…' : 'コードを確認してログイン'}
+              {mfaLoading ? t('common.checking') : t('login.mfaSubmit')}
             </button>
             <button
               type="button"
               className="login-button login-button-secondary"
               onClick={() => { setMfaToken(null); setMfaCode(''); setError(null) }}
             >
-              戻る
+              {t('common.back')}
             </button>
           </form>
 
-          {error && <div className="error">Error: {error}</div>}
+          {error && <div className="error">{t('common.error')}: {error}</div>}
         </div>
       </div>
     )
@@ -590,27 +596,18 @@ function LoginScreen({ onToken, initialMfaToken }) {
     <div className="app-root login-screen">
       <div className="login-card">
         <BrandLockup className="sidebar-brand" />
-        <p className="login-subtitle">続けるにはログインしてください</p>
+        <LanguageSwitcher className="login-language-switcher" />
+        <p className="login-subtitle">{t('login.subtitle')}</p>
 
         <div className="login-options">
-          <button
-            type="button"
-            className="login-button login-button-apple"
-            disabled={!appleClientId}
-            onClick={handleAppleSignIn}
-          >
-             Appleでサインイン
-          </button>
-          {!appleClientId && <small className="login-hint">サーバーでAPPLE_CLIENT_IDが未設定です</small>}
-
           {googleClientId ? (
             <div id="google-signin-button" className="login-google-button" />
           ) : (
             <>
               <button type="button" className="login-button" disabled>
-                Googleでサインイン
+                {t('login.googleSignIn')}
               </button>
-              <small className="login-hint">サーバーでGOOGLE_CLIENT_IDが未設定です</small>
+              <small className="login-hint">{t('login.googleMissing')}</small>
             </>
           )}
 
@@ -620,9 +617,9 @@ function LoginScreen({ onToken, initialMfaToken }) {
             disabled={!githubClientId}
             onClick={handleGitHubSignIn}
           >
-            GitHubでサインイン
+            {t('login.githubSignIn')}
           </button>
-          {!githubClientId && <small className="login-hint">サーバーでGITHUB_CLIENT_IDが未設定です</small>}
+          {!githubClientId && <small className="login-hint">{t('login.githubMissing')}</small>}
 
           <button
             type="button"
@@ -630,11 +627,11 @@ function LoginScreen({ onToken, initialMfaToken }) {
             disabled={!microsoftClientId}
             onClick={handleMicrosoftSignIn}
           >
-            Microsoftでサインイン
+            {t('login.microsoftSignIn')}
           </button>
-          {!microsoftClientId && <small className="login-hint">サーバーでMICROSOFT_CLIENT_IDが未設定です</small>}
+          {!microsoftClientId && <small className="login-hint">{t('login.microsoftMissing')}</small>}
 
-          <div className="login-divider">または</div>
+          <div className="login-divider">{t('login.divider')}</div>
 
           <div className="code-auth">
             <div className="code-auth-tabs">
@@ -643,21 +640,21 @@ function LoginScreen({ onToken, initialMfaToken }) {
                 className={codeMode === 'signup' ? 'active' : ''}
                 onClick={() => switchCodeMode('signup')}
               >
-                新規登録
+                {t('login.tabSignup')}
               </button>
               <button
                 type="button"
                 className={codeMode === 'login' ? 'active' : ''}
                 onClick={() => switchCodeMode('login')}
               >
-                ログイン
+                {t('login.tabLogin')}
               </button>
               <button
                 type="button"
                 className={codeMode === 'forgot' ? 'active' : ''}
                 onClick={() => switchCodeMode('forgot')}
               >
-                ログインコードを忘れた
+                {t('login.tabForgot')}
               </button>
             </div>
 
@@ -666,12 +663,12 @@ function LoginScreen({ onToken, initialMfaToken }) {
                 <input
                   type="email"
                   required
-                  placeholder="メールアドレス"
+                  placeholder={t('login.emailPlaceholder')}
                   value={codeEmail}
                   onChange={(e) => setCodeEmail(e.target.value)}
                 />
                 <button type="submit" className="login-button" disabled={codeLoading}>
-                  {codeLoading ? '処理中…' : 'メールで登録してログインコードを発行'}
+                  {codeLoading ? t('common.loadingEllipsis') : t('login.signupSubmit')}
                 </button>
               </form>
             )}
@@ -681,19 +678,19 @@ function LoginScreen({ onToken, initialMfaToken }) {
                 <input
                   type="email"
                   required
-                  placeholder="メールアドレス"
+                  placeholder={t('login.emailPlaceholder')}
                   value={codeEmail}
                   onChange={(e) => setCodeEmail(e.target.value)}
                 />
                 <input
                   type="text"
                   required
-                  placeholder="12桁のログインコード"
+                  placeholder={t('login.codePlaceholder')}
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
                 />
                 <button type="submit" className="login-button" disabled={codeLoading}>
-                  {codeLoading ? '処理中…' : 'ログインコードでログイン'}
+                  {codeLoading ? t('common.loadingEllipsis') : t('login.loginSubmit')}
                 </button>
                 {codeAuthNotice && <p className="login-hint">{codeAuthNotice}</p>}
               </form>
@@ -704,12 +701,12 @@ function LoginScreen({ onToken, initialMfaToken }) {
                 <input
                   type="email"
                   required
-                  placeholder="メールアドレス"
+                  placeholder={t('login.emailPlaceholder')}
                   value={codeEmail}
                   onChange={(e) => setCodeEmail(e.target.value)}
                 />
                 <button type="submit" className="login-button" disabled={codeLoading}>
-                  {codeLoading ? '処理中…' : 'ログインコードを再発行してメールで送る'}
+                  {codeLoading ? t('common.loadingEllipsis') : t('login.reissueSubmit')}
                 </button>
                 {codeAuthNotice && <p className="login-hint">{codeAuthNotice}</p>}
               </form>
@@ -718,20 +715,21 @@ function LoginScreen({ onToken, initialMfaToken }) {
 
           {import.meta.env.DEV && (
             <button type="button" className="login-button login-button-dev" onClick={handleDevLogin} disabled={devLoading}>
-              {devLoading ? '処理中…' : <><Settings2 aria-hidden="true" /> 開発用ログイン</>}
+              {devLoading ? t('common.loadingEllipsis') : <><Settings2 aria-hidden="true" /> {t('login.devLogin')}</>}
             </button>
           )}
         </div>
 
-        {error && <div className="error">Error: {error}</div>}
+        {error && <div className="error">{t('common.error')}: {error}</div>}
 
-        <p className="login-credit">Made by Krasis</p>
+        <p className="login-credit">{t('login.credit')}</p>
       </div>
     </div>
   )
 }
 
 function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyChange }) {
+  const { lang, t } = useLanguage()
   const [topic, setTopic] = useState('')
   const [field, setField] = useState(DEFAULT_FIELD)
   const [referenceFiles, setReferenceFiles] = useState([])
@@ -792,12 +790,13 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
   const referenceDrop = useFileDrop(addReferenceFiles)
   const formatDrop = useFileDrop(setFormatFileFromList)
 
-  async function submitGenerate({ topic: t, field: f, referenceFiles: rf, formatFile: ff, targetLength, isPrivate: priv }) {
+  async function submitGenerate({ topic: topicArg, field: fieldArg, referenceFiles: rf, formatFile: ff, targetLength, isPrivate: priv }) {
     const formData = new FormData()
-    formData.append('topic', t)
-    formData.append('field', f)
+    formData.append('topic', topicArg)
+    formData.append('field', fieldArg)
     if (targetLength) formData.append('target_length', targetLength)
     formData.append('private', priv ? 'true' : 'false')
+    formData.append('lang', lang)
     rf.forEach((file) => formData.append('reference_files', file))
     if (ff) formData.append('format_file', ff)
 
@@ -820,7 +819,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
     setError(null)
 
     if (!topic.trim()) {
-      setError('プロンプトを入力してください')
+      setError(t('outline.promptRequired'))
       return
     }
 
@@ -889,7 +888,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
       <div className="thread">
         {messages.length === 0 && (
           <div className="empty-state">
-            下のボックスにテーマを入力し、必要なら参考資料やフォーマット指定ファイルを添付して送信してください。
+            {t('outline.empty')}
           </div>
         )}
 
@@ -897,10 +896,10 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
           <div className={`message message-${m.role}`} key={i}>
             {m.role === 'user' ? (
               <>
-                <div className="message-author">You</div>
+                <div className="message-author">{t('common.you')}</div>
                 <div className="message-body">
                   <p>{m.topic}</p>
-                  <span className="message-tag">分野: {m.field}</span>
+                  <span className="message-tag">{t('outline.fieldTag', { field: m.field })}</span>
                   {(m.referenceFileNames.length > 0 || m.formatFileName) && (
                     <div className="message-attachments">
                       {m.referenceFileNames.map((name, j) => (
@@ -913,7 +912,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
               </>
             ) : (
               <>
-                <div className="message-author">Assistant</div>
+                <div className="message-author">{t('common.assistant')}</div>
                 <div className="message-body">
                   {m.error && <div className="error">Error: {m.error}</div>}
                   {m.brushOff && <p className="brush-off">{m.brushOff}</p>}
@@ -942,7 +941,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
 
         {loading && (
           <div className="message message-assistant">
-            <div className="message-author">Assistant</div>
+            <div className="message-author">{t('common.assistant')}</div>
             <div className="message-body"><span className="typing"><LoadingDots /></span></div>
           </div>
         )}
@@ -956,7 +955,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
           onClick={() => setAttachOpen((v) => !v)}
         >
           <span className={`attach-toggle-caret ${attachOpen ? 'open' : ''}`}>▸</span>
-          添付ファイル(参考資料・フォーマット指定)
+          {t('outline.attachToggle')}
           {(referenceFiles.length > 0 || formatFile) && !attachOpen && (
             <span className="attach-toggle-count">
               {referenceFiles.length + (formatFile ? 1 : 0)}
@@ -976,8 +975,8 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 onChange={(e) => { addReferenceFiles(e.target.files); e.target.value = '' }}
               />
               <span className="attach-icon">⊕</span>
-              <span className="attach-label">参考資料を追加</span>
-              <small>txt/md/pdf/docxは中身を読み込みます(複数可、それ以外はファイル名のみ)</small>
+              <span className="attach-label">{t('outline.addReference')}</span>
+              <small>{t('outline.referenceHint')}</small>
             </div>
 
             <div className="attach-box" {...formatDrop} onClick={() => formatInputRef.current?.click()}>
@@ -989,8 +988,8 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 onChange={(e) => { setFormatFileFromList(e.target.files); e.target.value = '' }}
               />
               <span className="attach-icon">▦</span>
-              <span className="attach-label">フォーマット指定ファイルを追加</span>
-              <small>生成する論文の形式を指定するファイル(1件、txt/md/pdf/docx対応)</small>
+              <span className="attach-label">{t('outline.addFormat')}</span>
+              <small>{t('outline.formatHint')}</small>
             </div>
           </div>
         )}
@@ -1003,7 +1002,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 <button
                   type="button"
                   className="chip-remove"
-                  aria-label={`${f.name}を添付から削除`}
+                  aria-label={t('outline.removeAttachmentAria', { name: f.name })}
                   onClick={() => removeReferenceFile(i)}
                 >
                   ×
@@ -1016,7 +1015,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
                 <button
                   type="button"
                   className="chip-remove"
-                  aria-label={`${formatFile.name}を添付から削除`}
+                  aria-label={t('outline.removeAttachmentAria', { name: formatFile.name })}
                   onClick={() => setFormatFile(null)}
                 >
                   ×
@@ -1027,12 +1026,12 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
         )}
 
         {awaitingLength && (
-          <div className="composer-hint">上のメッセージで生成する分量を選んでください</div>
+          <div className="composer-hint">{t('outline.chooseLengthHint')}</div>
         )}
 
         <textarea
           className="prompt-box"
-          placeholder="例: 生成AIが学術論文の執筆プロセスに与える影響について調査計画を作りたい"
+          placeholder={t('outline.topicPlaceholder')}
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           onFocus={() => setFocused(true)}
@@ -1046,7 +1045,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
             className="field-input"
             value={field}
             onChange={(e) => setField(e.target.value)}
-            placeholder="分野(例: 教育技術)"
+            placeholder={t('outline.fieldPlaceholder')}
             disabled={awaitingLength}
           />
           <label className="private-toggle">
@@ -1056,10 +1055,10 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
               onChange={(e) => setIsPrivate(e.target.checked)}
               disabled={awaitingLength}
             />
-            <LockKeyhole aria-hidden="true" /> シークレットとして保存
+            <LockKeyhole aria-hidden="true" /> {t('outline.savePrivate')}
           </label>
           <button type="submit" className="send-button" disabled={loading || !topic.trim() || awaitingLength}>
-            {loading ? <LoadingDots /> : '送信 →'}
+            {loading ? <LoadingDots /> : t('common.send')}
           </button>
         </div>
 
@@ -1116,6 +1115,31 @@ function MermaidDiagram({ code }) {
   return <div className="mermaid-diagram" ref={containerRef} />
 }
 
+// 「# 見出し」「## 見出し」形式のMarkdown見出しを、地の文(段落)とは別の要素として
+// パースする(本文生成・ai-agentsの解説などが共通してこの形式の見出しを使うため)。
+// 見出しはh3/h4として描画され、CSS側で本文(p)とは別のフォント(serif)を当てる。
+// 見出しの直後に空行を挟まず本文(箇条書き等)が続くことが多いため、ブロック全体では
+// なくブロックの先頭行だけを見出し判定し、残りはそのまま段落として描画する。
+function renderMarkdownBlocks(text, keyPrefix) {
+  return text
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .flatMap((block, bi) => {
+      const lines = block.split('\n')
+      const headingMatch = lines[0].match(/^(#{1,3})\s+(.+)$/)
+      if (!headingMatch) {
+        return [<p key={`${keyPrefix}-${bi}`}>{block}</p>]
+      }
+
+      const HeadingTag = headingMatch[1].length === 1 ? 'h3' : 'h4'
+      const nodes = [<HeadingTag key={`${keyPrefix}-${bi}-h`}>{headingMatch[2]}</HeadingTag>]
+      const rest = lines.slice(1).join('\n').trim()
+      if (rest) nodes.push(<p key={`${keyPrefix}-${bi}-p`}>{rest}</p>)
+      return nodes
+    })
+}
+
 function MessageContent({ content }) {
   return (
     <>
@@ -1123,45 +1147,25 @@ function MessageContent({ content }) {
         part.type === 'mermaid' ? (
           <MermaidDiagram key={i} code={part.value} />
         ) : (
-          part.value.trim() && <p key={i}>{part.value.trim()}</p>
+          renderMarkdownBlocks(part.value, i)
         )
       )}
     </>
   )
 }
 
-// 本文生成では「## 見出し」形式のMarkdown見出しを使うよう指示しているため、
-// それだけを簡易的にパースして描画する(それ以外の地の文は段落として扱う)。
 function PaperBodyContent({ content }) {
   return (
     <>
-      {splitMermaidBlocks(content).map((part, pi) => {
-        if (part.type === 'mermaid') return <MermaidDiagram key={pi} code={part.value} />
-
-        return part.value
-          .split(/\n{2,}/)
-          .map((block) => block.trim())
-          .filter(Boolean)
-          .map((block, bi) => {
-            const headingMatch = block.match(/^(#{1,3})\s+(.+)$/)
-            if (headingMatch) {
-              const key = `${pi}-${bi}`
-              return headingMatch[1].length === 1 ? (
-                <h3 key={key}>{headingMatch[2]}</h3>
-              ) : (
-                <h4 key={key}>{headingMatch[2]}</h4>
-              )
-            }
-            return (
-              <p key={`${pi}-${bi}`}>{block}</p>
-            )
-          })
-      })}
+      {splitMermaidBlocks(content).map((part, pi) =>
+        part.type === 'mermaid' ? <MermaidDiagram key={pi} code={part.value} /> : renderMarkdownBlocks(part.value, pi)
+      )}
     </>
   )
 }
 
 function CourseGuide({ onGenerated }) {
+  const { lang, t } = useLanguage()
   const [university, setUniversity] = useState('')
   const [customUniversity, setCustomUniversity] = useState('')
   const [faculty, setFaculty] = useState('')
@@ -1221,6 +1225,7 @@ function CourseGuide({ onGenerated }) {
           department: department.trim(),
           messages: nextMessages,
           history_id: historyIdRef.current,
+          lang,
         }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
@@ -1240,15 +1245,15 @@ function CourseGuide({ onGenerated }) {
     <>
       <div className="course-picker">
         <select value={university} onChange={handleUniversityChange} disabled={locked}>
-          <option value="">大学を選択</option>
+          <option value="">{t('courseGuide.selectUniversity')}</option>
           {UNIVERSITY_NAMES.map((name) => (
-            <option key={name} value={name}>{name}</option>
+            <option key={name} value={name}>{name === OTHER_UNIVERSITY ? t('courseGuide.otherUniversity') : name}</option>
           ))}
         </select>
         {isCustomUniv && (
           <input
             type="text"
-            placeholder="大学名を入力"
+            placeholder={t('courseGuide.universityPlaceholder')}
             value={customUniversity}
             onChange={(e) => setCustomUniversity(e.target.value)}
             disabled={locked}
@@ -1259,7 +1264,7 @@ function CourseGuide({ onGenerated }) {
           isCustomUniv ? (
             <input
               type="text"
-              placeholder="学部名を入力"
+              placeholder={t('courseGuide.facultyPlaceholder')}
               value={customFaculty}
               onChange={(e) => setCustomFaculty(e.target.value)}
               disabled={locked}
@@ -1267,16 +1272,16 @@ function CourseGuide({ onGenerated }) {
           ) : (
             <>
               <select value={faculty} onChange={(e) => setFaculty(e.target.value)} disabled={locked}>
-                <option value="">学部を選択</option>
+                <option value="">{t('courseGuide.selectFaculty')}</option>
                 {facultyOptions.map((f) => (
                   <option key={f} value={f}>{f}</option>
                 ))}
-                <option value={OTHER_UNIVERSITY}>{OTHER_UNIVERSITY}</option>
+                <option value={OTHER_UNIVERSITY}>{t('courseGuide.otherUniversity')}</option>
               </select>
               {isCustomFaculty && (
                 <input
                   type="text"
-                  placeholder="学部名を入力"
+                  placeholder={t('courseGuide.facultyPlaceholder')}
                   value={customFaculty}
                   onChange={(e) => setCustomFaculty(e.target.value)}
                   disabled={locked}
@@ -1289,7 +1294,7 @@ function CourseGuide({ onGenerated }) {
         {canChat && (
           <input
             type="text"
-            placeholder="学科・専攻(任意)"
+            placeholder={t('courseGuide.departmentPlaceholder')}
             value={department}
             onChange={(e) => setDepartment(e.target.value)}
             disabled={locked}
@@ -1304,7 +1309,7 @@ function CourseGuide({ onGenerated }) {
 
         {locked && (
           <button type="button" className="course-picker-reset" onClick={handleReset}>
-            ↺ 対象を変更
+            {t('courseGuide.changeTarget')}
           </button>
         )}
       </div>
@@ -1313,8 +1318,8 @@ function CourseGuide({ onGenerated }) {
         {messages.length === 0 && (
           <div className="empty-state">
             {canChat
-              ? '気になる授業について、下のボックスから質問してください。'
-              : '上で大学と学部を選択すると、質問できるようになります。'}
+              ? t('courseGuide.emptyReady')
+              : t('courseGuide.emptyNotReady')}
           </div>
         )}
 
@@ -1322,12 +1327,12 @@ function CourseGuide({ onGenerated }) {
           <div className={`message message-${m.role}`} key={i}>
             {m.role === 'user' ? (
               <>
-                <div className="message-author">You</div>
+                <div className="message-author">{t('common.you')}</div>
                 <div className="message-body"><p>{m.content}</p></div>
               </>
             ) : (
               <>
-                <div className="message-author">Assistant</div>
+                <div className="message-author">{t('common.assistant')}</div>
                 <div className="message-body">
                   {m.error ? <div className="error">Error: {m.error}</div> : <MessageContent content={m.content} />}
                 </div>
@@ -1338,8 +1343,8 @@ function CourseGuide({ onGenerated }) {
 
         {loading && (
           <div className="message message-assistant">
-            <div className="message-author">Assistant</div>
-            <div className="message-body"><span className="typing"><LoadingDots label="考え中" /></span></div>
+            <div className="message-author">{t('common.assistant')}</div>
+            <div className="message-body"><span className="typing"><LoadingDots label={t('common.thinking')} /></span></div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -1348,7 +1353,7 @@ function CourseGuide({ onGenerated }) {
       <form className="composer" onSubmit={handleSend}>
         <textarea
           className="prompt-box"
-          placeholder={canChat ? '例: 民法の授業は何を勉強しますか？' : '上で大学・学部を選択すると入力できます'}
+          placeholder={canChat ? t('courseGuide.inputPlaceholderReady') : t('courseGuide.inputPlaceholderNotReady')}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           rows={3}
@@ -1356,7 +1361,7 @@ function CourseGuide({ onGenerated }) {
         />
         <div className="composer-toolbar">
           <button type="submit" className="send-button" disabled={!canChat || loading || !input.trim()}>
-            {loading ? '送信中…' : '送信 →'}
+            {loading ? t('common.sending') : t('common.send')}
           </button>
         </div>
         {error && <div className="error">Error: {error}</div>}
@@ -1365,18 +1370,410 @@ function CourseGuide({ onGenerated }) {
   )
 }
 
-function formatMinutes(minutes) {
+// ai-agentsのプロフィール選択肢。level/role/category/region の id はバックエンド
+// (ai_agents.py の LEVEL_LABELS 等)のキーと1対1なので、変更する場合はバックエンド側も
+// 合わせて変更すること。purpose は自由記述欄なのでidにラベルそのものを使う。
+// labelはi18n.jsxのaiAgents.*キー(t()で解決する)。idはバックエンド(ai_agents.py)の
+// キーと1対1(purposeを除く)なので、値を変更する場合はバックエンド側も合わせて変更すること。
+const AI_AGENTS_LEVEL_OPTIONS = [
+  { id: 'beginner', label: 'aiAgents.levelBeginner' },
+  { id: 'intermediate', label: 'aiAgents.levelIntermediate' },
+  { id: 'advanced', label: 'aiAgents.levelAdvanced' },
+]
+
+const AI_AGENTS_ROLE_OPTIONS = [
+  { id: 'student', label: 'aiAgents.roleStudent' },
+  { id: 'employee', label: 'aiAgents.roleEmployee' },
+  { id: 'executive', label: 'aiAgents.roleExecutive' },
+  { id: 'founder', label: 'aiAgents.roleFounder' },
+  { id: 'investor', label: 'aiAgents.roleInvestor' },
+  { id: 'researcher', label: 'aiAgents.roleResearcher' },
+  { id: 'other', label: 'aiAgents.roleOther' },
+]
+
+// purposeは自由記述欄としてバックエンドに送るので、idはUI内だけで使う安定したスラッグにし、
+// 送信時にt(label)で現在の言語のテキストへ変換する(resolveAiAgentsPurpose参照)。
+const AI_AGENTS_PURPOSE_OPTIONS = [
+  { id: 'economics-study', label: 'aiAgents.purposeEconomicsStudy' },
+  { id: 'daily-news', label: 'aiAgents.purposeDailyNews' },
+  { id: 'stock-investing', label: 'aiAgents.purposeStockInvesting' },
+  { id: 'business-management', label: 'aiAgents.purposeBusinessManagement' },
+  { id: 'market-analysis', label: 'aiAgents.purposeMarketAnalysis' },
+  { id: 'geopolitics', label: 'aiAgents.purposeGeopolitics' },
+  { id: 'none', label: 'aiAgents.purposeNone' },
+]
+
+function resolveAiAgentsPurpose(purposeId, t) {
+  if (!purposeId || purposeId === 'none') return ''
+  const opt = AI_AGENTS_PURPOSE_OPTIONS.find((o) => o.id === purposeId)
+  return opt ? t(opt.label) : ''
+}
+
+const AI_AGENTS_CATEGORY_OPTIONS = [
+  { id: 'economics', label: 'aiAgents.categoryEconomics' },
+  { id: 'finance', label: 'aiAgents.categoryFinance' },
+]
+
+const AI_AGENTS_REGION_OPTIONS = {
+  economics: [
+    { id: 'japan', label: 'aiAgents.regionJapan' },
+    { id: 'us', label: 'aiAgents.regionUs' },
+    { id: 'world', label: 'aiAgents.regionWorld' },
+  ],
+  finance: [
+    { id: 'japan-stocks', label: 'aiAgents.regionJapanStocks' },
+    { id: 'us-stocks', label: 'aiAgents.regionUsStocks' },
+  ],
+}
+
+function findOptionLabel(options, id, t) {
+  const opt = options.find((opt) => opt.id === id)
+  return opt ? t(opt.label) : id
+}
+
+const AI_AGENTS_EMPTY_PROFILE = { level: '', role: '', purpose: '', categories: [], regions: {} }
+
+// プロフィール設定を「選んで完了」形式にするための質問の並び。categoriesは複数選択可で、
+// 選ばれたカテゴリーの数だけ(Economics/Financeそれぞれの)region質問を末尾に追加する。
+// singleは1クリックで即次へ進み、multiは複数選んでから「次へ」で確定する。
+function buildAiAgentsSteps(profile) {
+  const steps = [
+    {
+      key: 'level',
+      type: 'single',
+      question: 'aiAgents.questionLevel',
+      options: AI_AGENTS_LEVEL_OPTIONS,
+      getValue: (p) => p.level,
+      apply: (p, value) => ({ ...p, level: value }),
+    },
+    {
+      key: 'role',
+      type: 'single',
+      question: 'aiAgents.questionRole',
+      options: AI_AGENTS_ROLE_OPTIONS,
+      getValue: (p) => p.role,
+      apply: (p, value) => ({ ...p, role: value }),
+    },
+    {
+      key: 'purpose',
+      type: 'single',
+      question: 'aiAgents.questionPurpose',
+      options: AI_AGENTS_PURPOSE_OPTIONS,
+      getValue: (p) => p.purpose,
+      apply: (p, value) => ({ ...p, purpose: value }),
+    },
+    {
+      key: 'categories',
+      type: 'multi',
+      question: 'aiAgents.questionCategories',
+      options: AI_AGENTS_CATEGORY_OPTIONS,
+      getValue: (p) => p.categories,
+      apply: (p, values) => ({ ...p, categories: values }),
+    },
+  ]
+
+  for (const cat of profile.categories) {
+    steps.push({
+      key: `region:${cat}`,
+      type: 'single',
+      question: cat === 'finance' ? 'aiAgents.questionRegionFinance' : 'aiAgents.questionRegionEconomics',
+      options: AI_AGENTS_REGION_OPTIONS[cat] || [],
+      getValue: (p) => p.regions[cat],
+      apply: (p, value) => ({ ...p, regions: { ...p.regions, [cat]: value } }),
+    })
+  }
+
+  return steps
+}
+
+function AiAgents({ onGenerated }) {
+  const { lang, t } = useLanguage()
+  const [profile, setProfile] = useState(AI_AGENTS_EMPTY_PROFILE)
+  // 何問目まで回答済みか。stepsと同じ長さに達したらプロフィール設定完了(=チャット可能)。
+  const [stepIndex, setStepIndex] = useState(0)
+  // categories(複数選択)の質問だけ、確定前の途中選択を別に持つ。
+  const [pendingCategories, setPendingCategories] = useState([])
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  // プロフィール確定後の「毎朝9時にリマインドしますか?」の状態。
+  // 'none'=未提示、'asked'=提示中(回答待ち)、'done'=回答済み。
+  const [reminderStage, setReminderStage] = useState('none')
+  const [reminderResult, setReminderResult] = useState(null) // null | 'enabled' | 'declined'
+  const [reminderSaving, setReminderSaving] = useState(false)
+  const [reminderError, setReminderError] = useState(null)
+  const bottomRef = useRef(null)
+  // 会話が続く限り同じ履歴項目を上書き更新するための、サーバー側の履歴ID
+  const historyIdRef = useRef(null)
+  // プロフィール確定直後の自動レポート生成を、1回だけ発火させるためのガード
+  const autoSentRef = useRef(false)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, loading])
+
+  const steps = buildAiAgentsSteps(profile)
+  const canChat = stepIndex >= steps.length
+
+  // プロフィールの選択が全て終わったら、ユーザーの操作を待たず自動でレポートを生成する。
+  useEffect(() => {
+    if (canChat && !autoSentRef.current) {
+      autoSentRef.current = true
+      sendMessage(t('aiAgents.defaultQuestion'))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canChat])
+
+  // 自動生成された最初のレポートが届いたら、毎朝9時のリマインドを提案する。
+  useEffect(() => {
+    if (reminderStage === 'none' && !loading && messages.length === 2 && messages[1]?.role === 'assistant' && !messages[1].error) {
+      setReminderStage('asked')
+    }
+  }, [messages, loading, reminderStage])
+
+  function handleAnswer(step, index, value) {
+    setProfile((prev) => step.apply(prev, value))
+    setStepIndex(index + 1)
+  }
+
+  function handleConfirmCategories(index) {
+    if (pendingCategories.length === 0) return
+    setProfile((prev) => ({ ...prev, categories: pendingCategories }))
+    setStepIndex(index + 1)
+  }
+
+  function handleReset() {
+    setProfile(AI_AGENTS_EMPTY_PROFILE)
+    setStepIndex(0)
+    setPendingCategories([])
+    setMessages([])
+    setError(null)
+    historyIdRef.current = null
+    autoSentRef.current = false
+    setReminderStage('none')
+    setReminderResult(null)
+    setReminderError(null)
+  }
+
+  async function sendMessage(text) {
+    const q = text.trim()
+    if (!q || loading || !canChat) return
+
+    const nextMessages = [...messages, { role: 'user', content: q }]
+    setMessages(nextMessages)
+    setInput('')
+    setLoading(true)
+    setError(null)
+
+    try {
+      const resp = await apiFetch('/ai-agents-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level: profile.level,
+          role: profile.role,
+          purpose: resolveAiAgentsPurpose(profile.purpose, t),
+          categories: profile.categories,
+          regions: profile.regions,
+          messages: nextMessages,
+          history_id: historyIdRef.current,
+          lang,
+        }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      if (data.history_id) historyIdRef.current = data.history_id
+      setMessages((prev) => [...prev, { role: 'assistant', content: data.answer }])
+      onGenerated?.()
+    } catch (err) {
+      setError(String(err))
+      setMessages((prev) => [...prev, { role: 'assistant', error: String(err) }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleSend(e) {
+    e.preventDefault()
+    sendMessage(input)
+  }
+
+  async function handleReminderChoice(enable) {
+    setReminderStage('done')
+    if (!enable) {
+      setReminderResult('declined')
+      return
+    }
+    setReminderSaving(true)
+    setReminderError(null)
+    try {
+      const resp = await apiFetch('/ai-agents-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: true,
+          level: profile.level,
+          role: profile.role,
+          purpose: resolveAiAgentsPurpose(profile.purpose, t),
+          categories: profile.categories,
+          regions: profile.regions,
+          lang,
+        }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      setReminderResult('enabled')
+    } catch (err) {
+      setReminderError(String(err))
+    } finally {
+      setReminderSaving(false)
+    }
+  }
+
+  // プロフィール設定中は、質問1問だけを画面いっぱいに表示する(一覧で並べない)。
+  if (!canChat) {
+    const step = steps[stepIndex]
+    const selected = step.type === 'multi' ? pendingCategories : null
+
+    return (
+      <div className="ai-agents-fullscreen">
+        <div className="ai-agents-fullscreen-progress">{t('aiAgents.progress', { current: stepIndex + 1, total: steps.length })}</div>
+        <p className="ai-agents-fullscreen-question">{t(step.question)}</p>
+        <div className="ai-agents-fullscreen-options">
+          {step.options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`length-option ${step.type === 'multi' ? (selected.includes(opt.id) ? 'chosen' : '') : ''}`}
+              onClick={() => {
+                if (step.type === 'multi') {
+                  setPendingCategories((prev) =>
+                    prev.includes(opt.id) ? prev.filter((id) => id !== opt.id) : [...prev, opt.id]
+                  )
+                } else {
+                  handleAnswer(step, stepIndex, opt.id)
+                }
+              }}
+            >
+              {t(opt.label)}
+            </button>
+          ))}
+        </div>
+        {step.type === 'multi' && (
+          <button
+            type="button"
+            className="send-button wizard-confirm"
+            disabled={pendingCategories.length === 0}
+            onClick={() => handleConfirmCategories(stepIndex)}
+          >
+            {t('aiAgents.next')}
+          </button>
+        )}
+        {stepIndex > 0 && (
+          <button type="button" className="course-picker-reset wizard-reset" onClick={handleReset}>
+            {t('aiAgents.startOver')}
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  const profileSummary = [
+    findOptionLabel(AI_AGENTS_LEVEL_OPTIONS, profile.level, t),
+    findOptionLabel(AI_AGENTS_ROLE_OPTIONS, profile.role, t),
+    resolveAiAgentsPurpose(profile.purpose, t),
+    profile.categories
+      .map((cat) => `${findOptionLabel(AI_AGENTS_CATEGORY_OPTIONS, cat, t)}(${findOptionLabel(AI_AGENTS_REGION_OPTIONS[cat] || [], profile.regions[cat], t)})`)
+      .join(' / '),
+  ].filter(Boolean).join(' ・ ')
+
+  return (
+    <>
+      <div className="course-picker">
+        <span className="ai-agents-summary">{profileSummary}</span>
+        <button type="button" className="course-picker-reset" onClick={handleReset}>
+          {t('aiAgents.changeTarget')}
+        </button>
+      </div>
+
+      <div className="thread">
+        {messages.map((m, i) => (
+          <div className={`message message-${m.role}`} key={i}>
+            {m.role === 'user' ? (
+              <>
+                <div className="message-author">{t('common.you')}</div>
+                <div className="message-body"><p>{m.content}</p></div>
+              </>
+            ) : (
+              <>
+                <div className="message-author">{t('common.assistant')}</div>
+                <div className="message-body">
+                  {m.error ? <div className="error">Error: {m.error}</div> : <MessageContent content={m.content} />}
+                </div>
+              </>
+            )}
+          </div>
+        ))}
+
+        {loading && (
+          <div className="message message-assistant">
+            <div className="message-author">{t('common.assistant')}</div>
+            <div className="message-body"><span className="typing"><LoadingDots label={t('common.thinking')} /></span></div>
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {reminderStage === 'asked' && (
+        <div className="length-question wizard-step wizard-reminder">
+          <p>{t('aiAgents.reminderQuestion')}</p>
+          <div className="length-options">
+            <button type="button" className="length-option" disabled={reminderSaving} onClick={() => handleReminderChoice(true)}>
+              {t('aiAgents.reminderYes')}
+            </button>
+            <button type="button" className="length-option" disabled={reminderSaving} onClick={() => handleReminderChoice(false)}>
+              {t('aiAgents.reminderNo')}
+            </button>
+          </div>
+        </div>
+      )}
+      {reminderResult === 'enabled' && (
+        <div className="empty-state wizard-reminder">{t('aiAgents.reminderEnabled')}</div>
+      )}
+      {reminderError && <div className="error wizard-reminder">{t('common.error')}: {reminderError}</div>}
+
+      <form className="composer" onSubmit={handleSend}>
+        <textarea
+          className="prompt-box"
+          placeholder={canChat ? t('aiAgents.inputPlaceholderReady') : t('aiAgents.inputPlaceholderNotReady')}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          rows={3}
+          disabled={!canChat || loading}
+        />
+        <div className="composer-toolbar">
+          <button type="submit" className="send-button" disabled={!canChat || loading || !input.trim()}>
+            {loading ? t('common.sending') : t('common.send')}
+          </button>
+        </div>
+        {error && <div className="error">{t('common.error')}: {error}</div>}
+      </form>
+    </>
+  )
+}
+
+function formatMinutes(minutes, t) {
   if (minutes >= 60) {
     const hours = Math.floor(minutes / 60)
     const rest = minutes % 60
-    return rest > 0 ? `${hours}時間${rest}分` : `${hours}時間`
+    return rest > 0 ? t('common.hoursMinutes', { hours, minutes: rest }) : t('common.hoursOnly', { hours })
   }
-  return `${minutes}分`
+  return t('common.minutesOnly', { minutes })
 }
 
-function formatDateTime(iso) {
+function formatDateTime(iso, lang) {
   if (!iso) return ''
-  return new Date(iso).toLocaleString('ja-JP', {
+  return new Date(iso).toLocaleString(localeFor(lang), {
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -1385,6 +1782,7 @@ function formatDateTime(iso) {
 }
 
 function TaskReminders({ onGenerated }) {
+  const { lang, t } = useLanguage()
   const [tasks, setTasks] = useState([])
   const [description, setDescription] = useState('')
   const [deadline, setDeadline] = useState('')
@@ -1423,6 +1821,7 @@ function TaskReminders({ onGenerated }) {
         body: JSON.stringify({
           description: text,
           deadline: deadline ? new Date(deadline).toISOString() : null,
+          lang,
         }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
@@ -1460,7 +1859,7 @@ function TaskReminders({ onGenerated }) {
       <form className="task-form" onSubmit={handleSubmit}>
         <textarea
           className="prompt-box"
-          placeholder="例: 経済学のレポート(3000字)を書く"
+          placeholder={t('taskReminders.placeholder')}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
@@ -1468,7 +1867,7 @@ function TaskReminders({ onGenerated }) {
         />
         <div className="task-form-row">
           <label className="task-deadline-label">
-            締切(任意)
+            {t('taskReminders.deadlineLabel')}
             <input
               type="datetime-local"
               value={deadline}
@@ -1477,30 +1876,30 @@ function TaskReminders({ onGenerated }) {
             />
           </label>
           <button type="submit" className="send-button" disabled={loading || !description.trim()}>
-            {loading ? '見積もり中…' : 'AIに見積もってもらう'}
+            {loading ? t('taskReminders.estimating') : t('taskReminders.submit')}
           </button>
         </div>
-        {error && <div className="error">Error: {error}</div>}
+        {error && <div className="error">{t('common.error')}: {error}</div>}
       </form>
 
       <ul className="task-list">
         {listLoaded && tasks.length === 0 && (
-          <div className="empty-state">まだタスクがありません。上のフォームから追加してください。</div>
+          <div className="empty-state">{t('taskReminders.empty')}</div>
         )}
         {tasks.map((task) => (
           <li key={task.id} className={`task-item ${task.status === 'done' ? 'task-item-done' : ''}`}>
             <div className="task-item-main">
               <div className="task-item-description">{task.description}</div>
               <div className="task-item-meta">
-                所要時間の目安: 約{formatMinutes(task.estimated_minutes)}
-                {task.deadline && <> ・ 締切: {formatDateTime(task.deadline)}</>}
-                ・ リマインド予定: {formatDateTime(task.remind_at)}
+                {t('taskReminders.durationEstimate', { duration: formatMinutes(task.estimated_minutes, t) })}
+                {task.deadline && <>{t('taskReminders.deadlineLine', { date: formatDateTime(task.deadline, lang) })}</>}
+                {' '}{t('taskReminders.remindLine', { date: formatDateTime(task.remind_at, lang) })}
               </div>
               {task.reasoning && <div className="task-item-reasoning">{task.reasoning}</div>}
             </div>
             <div className="task-item-actions">
               <button type="button" onClick={() => handleToggleStatus(task)}>
-                {task.status === 'done' ? '未完了に戻す' : '完了にする'}
+                {task.status === 'done' ? t('taskReminders.markPending') : t('taskReminders.markDone')}
               </button>
               <button type="button" className="task-item-delete" aria-label="🗑" onClick={() => handleDelete(task)}>
                 <Trash2 aria-hidden="true" />
@@ -1531,6 +1930,7 @@ function downloadTaskExcel(item) {
 }
 
 function TaskGenerator({ onGenerated }) {
+  const { lang, t } = useLanguage()
   const [description, setDescription] = useState('')
   const [kind, setKind] = useState('text')
   const [loading, setLoading] = useState(false)
@@ -1548,7 +1948,7 @@ function TaskGenerator({ onGenerated }) {
       const resp = await apiFetch('/task-generator', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: text, kind }),
+        body: JSON.stringify({ description: text, kind, lang }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
 
@@ -1577,7 +1977,7 @@ function TaskGenerator({ onGenerated }) {
       <form className="task-form" onSubmit={handleSubmit}>
         <textarea
           className="prompt-box"
-          placeholder="例: 4月〜9月の売上集計表をExcelで作って / 江戸時代の身分制度についてレポートをまとめて"
+          placeholder={t('taskGenerator.placeholder')}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
@@ -1590,29 +1990,29 @@ function TaskGenerator({ onGenerated }) {
             onChange={(e) => setKind(e.target.value)}
             disabled={loading}
           >
-            <option value="text">文章の課題(レポート・回答など)</option>
-            <option value="excel">Excelの課題(表計算)</option>
+            <option value="text">{t('taskGenerator.kindText')}</option>
+            <option value="excel">{t('taskGenerator.kindExcel')}</option>
           </select>
           <button type="submit" className="send-button" disabled={loading || !description.trim()}>
-            {loading ? '作成中…' : 'AIに課題を完成させてもらう'}
+            {loading ? t('taskGenerator.creating') : t('taskGenerator.submit')}
           </button>
         </div>
-        {error && <div className="error">Error: {error}</div>}
+        {error && <div className="error">{t('common.error')}: {error}</div>}
       </form>
 
       <div className="task-generator-list">
         {items.length === 0 && (
-          <div className="empty-state">まだ生成した課題はありません。上のフォームから依頼してください。</div>
+          <div className="empty-state">{t('taskGenerator.empty')}</div>
         )}
         {items.map((item) => (
           <div className="task-generator-item" key={item.id}>
             <div className="task-generator-item-header">
               <span className="task-generator-item-desc">{item.description}</span>
-              <span className="message-tag">{item.kind === 'excel' ? 'Excel' : '文章'}</span>
+              <span className="message-tag">{item.kind === 'excel' ? t('taskGenerator.tagExcel') : t('taskGenerator.tagText')}</span>
             </div>
             {item.kind === 'excel' ? (
               <button type="button" className="export-button" onClick={() => downloadTaskExcel(item)}>
-                <FileSpreadsheet aria-hidden="true" /> {item.filename} をダウンロード
+                <FileSpreadsheet aria-hidden="true" /> {t('taskGenerator.downloadFile', { filename: item.filename })}
               </button>
             ) : (
               <>
@@ -1620,7 +2020,7 @@ function TaskGenerator({ onGenerated }) {
                   <PaperBodyContent content={item.content} />
                 </div>
                 <button type="button" className="export-button" onClick={() => downloadTaskText(item)}>
-                  <Download aria-hidden="true" /> Markdownでダウンロード
+                  <Download aria-hidden="true" /> {t('taskGenerator.downloadMarkdown')}
                 </button>
               </>
             )}
@@ -1632,6 +2032,7 @@ function TaskGenerator({ onGenerated }) {
 }
 
 function StudyNotes({ onGenerated }) {
+  const { lang, t } = useLanguage()
   const [text, setText] = useState('')
   const [file, setFile] = useState(null)
   const [focus, setFocus] = useState('')
@@ -1644,7 +2045,7 @@ function StudyNotes({ onGenerated }) {
     e.preventDefault()
     if (loading) return
     if (!text.trim() && !file) {
-      setError('レポート・資料のテキストを貼り付けるか、ファイルを添付してください')
+      setError(t('studyNotes.missingInput'))
       return
     }
 
@@ -1654,6 +2055,7 @@ function StudyNotes({ onGenerated }) {
       const formData = new FormData()
       formData.append('text', text)
       formData.append('focus', focus)
+      formData.append('lang', lang)
       if (file) formData.append('file', file)
 
       const resp = await apiFetch('/study-notes', { method: 'POST', body: formData })
@@ -1681,7 +2083,7 @@ function StudyNotes({ onGenerated }) {
       <form className="task-form" onSubmit={handleSubmit}>
         <textarea
           className="prompt-box"
-          placeholder="レポート・資料の本文をここに貼り付け(またはファイルを添付)"
+          placeholder={t('studyNotes.textPlaceholder')}
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={4}
@@ -1689,7 +2091,7 @@ function StudyNotes({ onGenerated }) {
         />
         <div className="task-form-row">
           <label className="study-notes-file-input">
-            ⊕ ファイルを添付
+            {t('studyNotes.attachFile')}
             <input
               ref={fileInputRef}
               type="file"
@@ -1705,7 +2107,7 @@ function StudyNotes({ onGenerated }) {
               <button
                 type="button"
                 className="chip-remove"
-                aria-label={`${file.name}を添付から削除`}
+                aria-label={t('studyNotes.removeAttachmentAria', { name: file.name })}
                 onClick={() => {
                   setFile(null)
                   if (fileInputRef.current) fileInputRef.current.value = ''
@@ -1721,20 +2123,20 @@ function StudyNotes({ onGenerated }) {
             className="field-input"
             value={focus}
             onChange={(e) => setFocus(e.target.value)}
-            placeholder="重視したい観点(任意、例: 試験に出そうな数値や定義)"
+            placeholder={t('studyNotes.focusPlaceholder')}
             disabled={loading}
           />
           <button type="submit" className="send-button" disabled={loading || (!text.trim() && !file)}>
-            {loading ? '分析中…' : '要点を整理してもらう'}
+            {loading ? t('studyNotes.analyzing') : t('studyNotes.submit')}
           </button>
         </div>
-        {error && <div className="error">Error: {error}</div>}
+        {error && <div className="error">{t('common.error')}: {error}</div>}
       </form>
 
       <div className="task-generator-list">
         {items.length === 0 && (
           <div className="empty-state">
-            まだ整理した資料はありません。レポートの本文を貼り付けるかファイルを添付して送信してください。
+            {t('studyNotes.empty')}
           </div>
         )}
         {items.map((item) => (
@@ -1752,66 +2154,83 @@ function StudyNotes({ onGenerated }) {
   )
 }
 
-// 左サイドバーのモード一覧・ヘッダー・コマンドパレットで共有する、5機能の静的な定義。
+// 左サイドバーのモード一覧・ヘッダー・コマンドパレットで共有する、5機能(学習アシスタント系)の静的な定義。
 // tag/idは既存のchannel値・見出しと1対1(バックエンドの実際の機能に対応させてある)。
+// short は i18n.jsx の modes.* キー(t()で解決する)。tag/idは既存のchannel値・見出しと
+// 1対1で、コード的な識別子として言語を問わずそのまま表示する。
 const MODE_DEFS = [
   {
     id: 'outline',
     tag: '# outline-generator',
-    short: 'テーマ・参考資料・フォーマット指定を送ると、調査アウトラインと関連文献を生成します',
+    short: 'modes.outlineShort',
     key: '⌘1',
   },
   {
     id: 'logic-guide',
     tag: '# logic-guide',
-    short: '大学・学部・学科を選んで、気になる授業内容をAIに質問できます',
+    short: 'modes.logicGuideShort',
     key: '⌘2',
   },
   {
     id: 'task-generator',
     tag: '# task-generator',
-    short: '課題の内容を送ると、AIが文章やExcelの表など、実際に提出できる成果物を作成します',
+    short: 'modes.taskGeneratorShort',
     key: '⌘3',
   },
   {
     id: 'tasks',
     tag: '# task-reminders',
-    short: 'タスク内容を送ると、AIが所要時間を見積もり、頃合いにメールでリマインドします',
+    short: 'modes.taskRemindersShort',
     key: '⌘4',
   },
   {
     id: 'study-notes',
     tag: '# study-notes',
-    short: 'レポート・資料を貼り付けるか添付すると、暗記すべき要点と全体の流れを整理します',
+    short: 'modes.studyNotesShort',
     key: '⌘5',
   },
 ]
 
-function formatActivityMinutes(minutes) {
-  if (minutes < 60) return `${Math.round(minutes)}分`
+// 学習アシスタント系(MODE_DEFS)とは別枠で扱う、AIエージェント系機能の静的な定義。
+// サイドバー・ホームでは独立したセクションとして表示するが、キーボードショートカット・
+// コマンドパレット・アクティブタブ判定はALL_MODE_DEFSで両者をまとめて扱う。
+const AI_AGENT_DEFS = [
+  {
+    id: 'ai-agents',
+    tag: '# ai-agents',
+    short: 'modes.aiAgentsShort',
+    key: '⌘6',
+  },
+]
+
+const ALL_MODE_DEFS = [...MODE_DEFS, ...AI_AGENT_DEFS]
+
+function formatActivityMinutes(minutes, t) {
+  if (minutes < 60) return t('common.minutesOnly', { minutes: Math.round(minutes) })
   const hours = Math.floor(minutes / 60)
   const mins = Math.round(minutes % 60)
-  return mins > 0 ? `${hours}時間${mins}分` : `${hours}時間`
+  return mins > 0 ? t('common.hoursMinutes', { hours, minutes: mins }) : t('common.hoursOnly', { hours })
 }
 
-function formatActivityBucketLabel(bucket, granularity) {
+function formatActivityBucketLabel(bucket, granularity, lang, t) {
   if (granularity === 'year') {
     const [, month] = bucket.split('-')
-    return `${Number(month)}月`
+    return t('common.monthLabel', { month: Number(month) })
   }
   const date = new Date(`${bucket}T00:00:00`)
-  return date.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })
+  return date.toLocaleDateString(localeFor(lang), { month: 'numeric', day: 'numeric' })
 }
 
 const ACTIVITY_RANGE_OPTIONS = [
-  { id: 'day', label: '日' },
-  { id: 'week', label: '週' },
-  { id: 'year', label: '年' },
+  { id: 'day', label: 'home.rangeDay' },
+  { id: 'week', label: 'home.rangeWeek' },
+  { id: 'year', label: 'home.rangeYear' },
 ]
 
 // アプリを開いたときの「ホーム」画面。利用時間(日/週/年)のグラフと、
 // 各モードへのクイックスタートを表示する(Claude CodeのNew session画面のような位置づけ)。
 function Home({ onSelectChannel }) {
+  const { lang, t } = useLanguage()
   const [granularity, setGranularity] = useState('day')
   const [items, setItems] = useState([])
   const [loading, setLoading] = useState(true)
@@ -1842,17 +2261,17 @@ function Home({ onSelectChannel }) {
     <div className="home">
       <div className="home-hero">
         <div className="home-hero-brand"><BrandLockup /></div>
-        <p className="home-hero-sub">今日は何をしますか?</p>
+        <p className="home-hero-sub">{t('home.greeting')}</p>
       </div>
 
       <section className="home-panel">
         <div className="home-panel-header">
           <div className="home-panel-heading">
-            <h2>利用時間</h2>
+            <h2>{t('home.usageTitle')}</h2>
             {!loading && totalMinutes > 0 && (
               <span className="home-panel-total">
-                {formatActivityMinutes(totalMinutes)}
-                <small>合計</small>
+                {formatActivityMinutes(totalMinutes, t)}
+                <small>{t('home.usageTotal')}</small>
               </span>
             )}
           </div>
@@ -1864,21 +2283,21 @@ function Home({ onSelectChannel }) {
                 className={`home-range-btn ${granularity === opt.id ? 'active' : ''}`}
                 onClick={() => setGranularity(opt.id)}
               >
-                {opt.label}
+                {t(opt.label)}
               </button>
             ))}
           </div>
         </div>
 
         {loading ? (
-          <div className="empty-state">読み込み中…</div>
+          <div className="empty-state">{t('home.loading')}</div>
         ) : totalMinutes === 0 ? (
-          <div className="empty-state">まだ利用記録がありません。下から機能を使ってみましょう。</div>
+          <div className="empty-state">{t('home.noUsageYet')}</div>
         ) : (
-          <div className="home-chart" role="img" aria-label="期間ごとの利用時間">
+          <div className="home-chart" role="img" aria-label={t('home.chartAriaLabel')}>
             {items.map((it, i) => {
-              const label = formatActivityBucketLabel(it.bucket, granularity)
-              const tooltip = `${label}: ${formatActivityMinutes(it.minutes)}`
+              const label = formatActivityBucketLabel(it.bucket, granularity, lang, t)
+              const tooltip = `${label}: ${formatActivityMinutes(it.minutes, t)}`
               return (
                 <div
                   className={`home-chart-col ${i === items.length - 1 ? 'current' : ''}`}
@@ -1900,7 +2319,7 @@ function Home({ onSelectChannel }) {
       </section>
 
       <section className="home-panel">
-        <h2>はじめる</h2>
+        <h2>{t('home.getStarted')}</h2>
         <div className="home-quickstart-grid">
           {MODE_DEFS.map((m) => (
             <button
@@ -1910,7 +2329,24 @@ function Home({ onSelectChannel }) {
               onClick={() => onSelectChannel(m.id)}
             >
               <span className="home-quickstart-tag">{m.tag}</span>
-              <span className="home-quickstart-desc">{m.short}</span>
+              <span className="home-quickstart-desc">{t(m.short)}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-panel">
+        <h2>{t('home.aiAgentsSection')}</h2>
+        <div className="home-quickstart-grid">
+          {AI_AGENT_DEFS.map((m) => (
+            <button
+              type="button"
+              key={m.id}
+              className="home-quickstart-card"
+              onClick={() => onSelectChannel(m.id)}
+            >
+              <span className="home-quickstart-tag">{m.tag}</span>
+              <span className="home-quickstart-desc">{t(m.short)}</span>
             </button>
           ))}
         </div>
@@ -1935,15 +2371,16 @@ async function downloadModeHistoryExcel(entryId, filename) {
 // 読み取り専用プレビュー。各モードは会話やアイテムをタブ内で再構築せず、生成当時の内容を
 // そのまま表示するだけにして、実装をモード横断で単純に保っている。
 function HistoryPreviewPanel({ record, onClose }) {
+  const { lang, t } = useLanguage()
   const { mode, title, payload, created_at } = record
   return (
     <div className="history-preview-overlay" onClick={onClose}>
       <div className="history-preview-panel" onClick={(e) => e.stopPropagation()}>
         <div className="history-preview-header">
           <h3>{title}</h3>
-          <button type="button" className="history-preview-close" aria-label="閉じる" onClick={onClose}><X aria-hidden="true" /></button>
+          <button type="button" className="history-preview-close" aria-label={t('common.close')} onClick={onClose}><X aria-hidden="true" /></button>
         </div>
-        <div className="history-preview-date">{new Date(created_at).toLocaleString('ja-JP')}</div>
+        <div className="history-preview-date">{new Date(created_at).toLocaleString(localeFor(lang))}</div>
         <div className="history-preview-body">
           {mode === 'logic-guide' && (
             <>
@@ -1972,7 +2409,7 @@ function HistoryPreviewPanel({ record, onClose }) {
                   className="export-button"
                   onClick={() => downloadModeHistoryExcel(record.id, payload.filename)}
                 >
-                  <FileSpreadsheet aria-hidden="true" /> {payload.filename} をダウンロード
+                  <FileSpreadsheet aria-hidden="true" /> {t('taskGenerator.downloadFile', { filename: payload.filename })}
                 </button>
               ) : (
                 <div className="paper-body">
@@ -1988,13 +2425,35 @@ function HistoryPreviewPanel({ record, onClose }) {
             </div>
           )}
 
+          {mode === 'ai-agents' && (
+            <>
+              <p className="history-preview-meta">
+                {findOptionLabel(AI_AGENTS_LEVEL_OPTIONS, payload.level, t)} ／
+                {' '}{findOptionLabel(AI_AGENTS_ROLE_OPTIONS, payload.role, t)} ／
+                {' '}{(payload.categories || []).map((cat) => (
+                  `${findOptionLabel(AI_AGENTS_CATEGORY_OPTIONS, cat, t)}・${findOptionLabel(AI_AGENTS_REGION_OPTIONS[cat] || [], payload.regions?.[cat], t)}`
+                )).join(' / ')}
+              </p>
+              <div className="thread">
+                {(payload.messages || []).map((m, i) => (
+                  <div className={`message message-${m.role}`} key={i}>
+                    <div className="message-author">{m.role === 'user' ? 'You' : 'Assistant'}</div>
+                    <div className="message-body">
+                      {m.role === 'user' ? <p>{m.content}</p> : <MessageContent content={m.content} />}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
           {mode === 'tasks' && (
             <div className="task-item-main">
               <div className="task-item-description">{payload.description}</div>
               <div className="task-item-meta">
-                所要時間の目安: 約{formatMinutes(payload.estimated_minutes)}
-                {payload.deadline && <> ・ 締切: {formatDateTime(payload.deadline)}</>}
-                ・ リマインド予定: {formatDateTime(payload.remind_at)}
+                {t('taskReminders.durationEstimate', { duration: formatMinutes(payload.estimated_minutes, t) })}
+                {payload.deadline && <>{t('taskReminders.deadlineLine', { date: formatDateTime(payload.deadline, lang) })}</>}
+                {' '}{t('taskReminders.remindLine', { date: formatDateTime(payload.remind_at, lang) })}
               </div>
               {payload.reasoning && <div className="task-item-reasoning">{payload.reasoning}</div>}
             </div>
@@ -2258,18 +2717,19 @@ function OutlinePanel({ outline, idPrefix, onFlash }) {
   )
 }
 
-function formatEventType(type) {
-  const labels = {
-    login_success: 'ログイン成功',
-    login_failed: 'ログイン失敗',
-    login_locked: 'アカウント一時ロック',
-    mfa_enabled: '多要素認証を有効化',
-    mfa_disabled: '多要素認証を無効化',
-    mfa_failed: '認証アプリのコード不一致',
-    mfa_confirm_failed: '認証アプリの登録確認に失敗',
-    mfa_disable_failed: '無効化時のコード不一致',
+function formatEventType(type, t) {
+  const labelKeys = {
+    login_success: 'security.eventLoginSuccess',
+    login_failed: 'security.eventLoginFailed',
+    login_locked: 'security.eventLoginLocked',
+    mfa_enabled: 'security.eventMfaEnabled',
+    mfa_disabled: 'security.eventMfaDisabled',
+    mfa_failed: 'security.eventMfaFailed',
+    mfa_confirm_failed: 'security.eventMfaConfirmFailed',
+    mfa_disable_failed: 'security.eventMfaDisableFailed',
+    logout_all: 'security.eventLogoutAll',
   }
-  return labels[type] || type
+  return labelKeys[type] ? t(labelKeys[type]) : type
 }
 
 function loginEventBadgeClass(type) {
@@ -2278,7 +2738,8 @@ function loginEventBadgeClass(type) {
   return 'login-badge-neutral'
 }
 
-function SecuritySettings({ onClose }) {
+function SecuritySettings({ onClose, onTokenRefresh }) {
+  const { lang, t } = useLanguage()
   const [status, setStatus] = useState(null) // { enabled, pending }
   const [secret, setSecret] = useState(null)
   const [otpauthUrl, setOtpauthUrl] = useState(null)
@@ -2286,6 +2747,7 @@ function SecuritySettings({ onClose }) {
   const [disableCode, setDisableCode] = useState('')
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(false)
+  const [logoutAllLoading, setLogoutAllLoading] = useState(false)
   const [error, setError] = useState(null)
   const [message, setMessage] = useState(null)
 
@@ -2336,10 +2798,15 @@ function SecuritySettings({ onClose }) {
         body: JSON.stringify({ code: confirmCode }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      // MFA有効化は既存セッションを全て失効させる仕様なので、このリクエスト自身の
+      // セッションは新しいトークンに差し替えて継続させる(でないと直後の操作で
+      // ログアウトさせられてしまう)。
+      if (data.token) onTokenRefresh?.(data.token)
       setSecret(null)
       setOtpauthUrl(null)
       setConfirmCode('')
-      setMessage('多要素認証を有効にしました。')
+      setMessage(t('security.mfaEnabledMessage'))
       await refresh()
     } catch (err) {
       setError(String(err))
@@ -2360,8 +2827,10 @@ function SecuritySettings({ onClose }) {
         body: JSON.stringify({ code: disableCode }),
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      if (data.token) onTokenRefresh?.(data.token)
       setDisableCode('')
-      setMessage('多要素認証を無効にしました。')
+      setMessage(t('security.mfaDisabledMessage'))
       await refresh()
     } catch (err) {
       setError(String(err))
@@ -2370,29 +2839,47 @@ function SecuritySettings({ onClose }) {
     }
   }
 
+  async function handleLogoutAll() {
+    setError(null)
+    setMessage(null)
+    setLogoutAllLoading(true)
+    try {
+      const resp = await apiFetch('/auth/logout-all', { method: 'POST' })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      if (data.token) onTokenRefresh?.(data.token)
+      setMessage(t('security.logoutAllMessage'))
+      await refresh()
+    } catch (err) {
+      setError(String(err))
+    } finally {
+      setLogoutAllLoading(false)
+    }
+  }
+
   return (
     <div className="security-panel">
       <div className="security-panel-header">
-        <h3><ShieldCheck aria-hidden="true" /> セキュリティ設定</h3>
-        <button type="button" className="security-panel-close" onClick={onClose} aria-label="閉じる"><X aria-hidden="true" /></button>
+        <h3><ShieldCheck aria-hidden="true" /> {t('security.title')}</h3>
+        <button type="button" className="security-panel-close" onClick={onClose} aria-label={t('security.close')}><X aria-hidden="true" /></button>
       </div>
 
       <section className="security-panel-section">
-        <h4>多要素認証(認証アプリ)</h4>
+        <h4>{t('security.mfaTitle')}</h4>
         {status?.enabled && (
           <>
-            <p className="security-panel-status security-panel-status-on">✓ 有効になっています</p>
+            <p className="security-panel-status security-panel-status-on">{t('security.mfaOn')}</p>
             <form className="code-auth-form" onSubmit={handleDisable}>
               <input
                 type="text"
                 required
                 inputMode="numeric"
-                placeholder="無効にするには現在の6桁コード"
+                placeholder={t('security.mfaDisablePlaceholder')}
                 value={disableCode}
                 onChange={(e) => setDisableCode(e.target.value)}
               />
               <button type="submit" className="login-button" disabled={loading}>
-                {loading ? '処理中…' : '多要素認証を無効にする'}
+                {loading ? t('common.loadingEllipsis') : t('security.mfaDisableSubmit')}
               </button>
             </form>
           </>
@@ -2401,50 +2888,66 @@ function SecuritySettings({ onClose }) {
         {status && !status.enabled && !secret && (
           <>
             <p className="security-panel-status">
-              {status.pending ? '設定途中です。もう一度シークレットを発行してください。' : '現在、無効です。'}
+              {status.pending ? t('security.mfaPending') : t('security.mfaOff')}
             </p>
             <button type="button" className="upgrade-button" onClick={handleStartSetup} disabled={loading}>
-              {loading ? '準備中…' : '多要素認証を設定する'}
+              {loading ? t('security.mfaPreparing') : t('security.mfaSetupStart')}
             </button>
           </>
         )}
 
         {secret && (
           <div className="security-mfa-setup">
-            <p>認証アプリ(Google Authenticator等)で以下のキーを手動追加してください。</p>
+            <p>{t('security.mfaSetupInstructions')}</p>
             <code className="security-mfa-secret">{secret}</code>
-            <p className="security-panel-hint">otpauth URL: {otpauthUrl}</p>
+            <p className="security-panel-hint">{t('security.otpauthUrlLabel', { url: otpauthUrl })}</p>
             <form className="code-auth-form" onSubmit={handleConfirm}>
               <input
                 type="text"
                 required
                 inputMode="numeric"
-                placeholder="表示された6桁のコード"
+                placeholder={t('security.mfaConfirmPlaceholder')}
                 value={confirmCode}
                 onChange={(e) => setConfirmCode(e.target.value)}
               />
               <button type="submit" className="login-button" disabled={loading}>
-                {loading ? '確認中…' : 'コードを確認して有効化'}
+                {loading ? t('common.checking') : t('security.mfaConfirmSubmit')}
               </button>
             </form>
           </div>
         )}
 
-        {message && <p className="security-panel-status security-panel-status-on">{message}</p>}
-        {error && <div className="error">Error: {error}</div>}
       </section>
 
       <section className="security-panel-section">
-        <h4>直近のログイン・セキュリティイベント</h4>
+        <h4>{t('security.sessionsTitle')}</h4>
+        <p className="security-panel-hint">
+          {t('security.sessionsHint')}
+        </p>
+        <button
+          type="button"
+          className="upgrade-button"
+          onClick={handleLogoutAll}
+          disabled={logoutAllLoading}
+        >
+          {logoutAllLoading ? t('common.loadingEllipsis') : t('security.logoutAllSubmit')}
+        </button>
+      </section>
+
+      {message && <p className="security-panel-status security-panel-status-on">{message}</p>}
+      {error && <div className="error">{t('common.error')}: {error}</div>}
+
+      <section className="security-panel-section">
+        <h4>{t('security.eventsTitle')}</h4>
         {events.length === 0 ? (
-          <p className="security-panel-hint">まだ記録がありません。</p>
+          <p className="security-panel-hint">{t('security.noEvents')}</p>
         ) : (
           <ul className="security-event-list">
             {events.map((ev) => (
               <li key={ev.id}>
-                <span className="security-event-type">{formatEventType(ev.event_type)}</span>
+                <span className="security-event-type">{formatEventType(ev.event_type, t)}</span>
                 <span className="security-event-date">
-                  {new Date(ev.created_at).toLocaleString('ja-JP', {
+                  {new Date(ev.created_at).toLocaleString(localeFor(lang), {
                     month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
                   })}
                 </span>
@@ -2468,13 +2971,14 @@ function AdminStat({ label, value, sub }) {
 }
 
 const LOGIN_EVENT_TYPE_OPTIONS = [
-  { value: '', label: 'すべての種別' },
-  { value: 'login_success', label: 'ログイン成功' },
-  { value: 'login_failed', label: 'ログイン失敗' },
-  { value: 'login_locked', label: 'アカウント一時ロック' },
-  { value: 'mfa_failed', label: '認証アプリのコード不一致' },
-  { value: 'mfa_enabled', label: '多要素認証を有効化' },
-  { value: 'mfa_disabled', label: '多要素認証を無効化' },
+  { value: '', label: 'security.filterAllTypes' },
+  { value: 'login_success', label: 'security.eventLoginSuccess' },
+  { value: 'login_failed', label: 'security.eventLoginFailed' },
+  { value: 'login_locked', label: 'security.eventLoginLocked' },
+  { value: 'mfa_failed', label: 'security.eventMfaFailed' },
+  { value: 'mfa_enabled', label: 'security.eventMfaEnabled' },
+  { value: 'mfa_disabled', label: 'security.eventMfaDisabled' },
+  { value: 'logout_all', label: 'security.eventLogoutAll' },
 ]
 
 const ADMIN_LOGIN_LOGS_PAGE_SIZE = 50
@@ -2482,6 +2986,7 @@ const ADMIN_LOGIN_LOGS_PAGE_SIZE = 50
 // 公開後はApple/Google/GitHub/メールコードの全ログイン方式でイベントが積み上がるため、
 // 種別・ユーザーID/メールアドレスで絞り込みつつページングして見られるようにする。
 function AdminLoginLogs() {
+  const { lang, t } = useLanguage()
   const [items, setItems] = useState([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -2508,11 +3013,11 @@ function AdminLoginLogs() {
       setTotal(result.total)
       setOffset(nextOffset)
     } catch (e) {
-      setError(e.message || '読み込みに失敗しました。')
+      setError(e.message || t('admin.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     load(0, eventType, q)
@@ -2529,24 +3034,24 @@ function AdminLoginLogs() {
   return (
     <section className="section-card admin-login-logs">
       <div className="admin-login-logs-header">
-        <h3>ログイン履歴</h3>
-        <span className="admin-login-logs-total">{total.toLocaleString('ja-JP')}件</span>
+        <h3>{t('admin.loginHistory')}</h3>
+        <span className="admin-login-logs-total">{t('admin.countSuffix', { count: total.toLocaleString(localeFor(lang)) })}</span>
       </div>
 
       <div className="admin-login-logs-filters">
         <select value={eventType} onChange={(e) => setEventType(e.target.value)}>
           {LOGIN_EVENT_TYPE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option key={opt.value} value={opt.value}>{t(opt.label)}</option>
           ))}
         </select>
         <form onSubmit={handleSearchSubmit} className="admin-login-logs-search">
           <input
             type="text"
-            placeholder="ユーザーID・メールアドレスで検索"
+            placeholder={t('admin.searchPlaceholder')}
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
           />
-          <button type="submit">検索</button>
+          <button type="submit">{t('admin.search')}</button>
         </form>
       </div>
 
@@ -2556,29 +3061,33 @@ function AdminLoginLogs() {
         <table className="admin-login-logs-table">
           <thead>
             <tr>
-              <th>日時</th>
-              <th>種別</th>
-              <th>対象</th>
-              <th>詳細</th>
-              <th>IPアドレス</th>
-              <th>User-Agent</th>
+              <th>{t('admin.colDate')}</th>
+              <th>{t('admin.colType')}</th>
+              <th>{t('admin.colSubject')}</th>
+              <th>{t('admin.colEmail')}</th>
+              <th>{t('admin.colDetail')}</th>
+              <th>{t('admin.colIp')}</th>
+              <th>{t('admin.colUserAgent')}</th>
             </tr>
           </thead>
           <tbody>
             {items.map((ev) => (
               <tr key={ev.id}>
                 <td className="admin-login-logs-date">
-                  {new Date(ev.created_at).toLocaleString('ja-JP', {
+                  {new Date(ev.created_at).toLocaleString(localeFor(lang), {
                     year: 'numeric', month: 'numeric', day: 'numeric',
                     hour: '2-digit', minute: '2-digit', second: '2-digit',
                   })}
                 </td>
                 <td>
                   <span className={`login-badge ${loginEventBadgeClass(ev.event_type)}`}>
-                    {formatEventType(ev.event_type)}
+                    {formatEventType(ev.event_type, t)}
                   </span>
                 </td>
                 <td className="admin-login-logs-subject">{ev.subject}</td>
+                <td className="admin-login-logs-email">
+                  {ev.subject_email || (ev.subject && ev.subject.includes('@') ? ev.subject : '—')}
+                </td>
                 <td>{ev.detail || '—'}</td>
                 <td>{ev.ip_address || '—'}</td>
                 <td className="admin-login-logs-ua" title={ev.user_agent || ''}>{ev.user_agent || '—'}</td>
@@ -2586,7 +3095,7 @@ function AdminLoginLogs() {
             ))}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={6} className="admin-login-logs-empty">まだ記録がありません。</td>
+                <td colSpan={7} className="admin-login-logs-empty">{t('admin.noRecords')}</td>
               </tr>
             )}
           </tbody>
@@ -2595,11 +3104,11 @@ function AdminLoginLogs() {
 
       <div className="admin-login-logs-pager">
         <button type="button" disabled={!canPrev || loading} onClick={() => load(Math.max(0, offset - ADMIN_LOGIN_LOGS_PAGE_SIZE), eventType, q)}>
-          ← 前へ
+          {t('admin.prevPage')}
         </button>
-        <span>{total === 0 ? '0件' : `${offset + 1}〜${offset + items.length} / ${total}件`}</span>
+        <span>{total === 0 ? t('admin.countSuffix', { count: 0 }) : t('admin.pageRange', { from: offset + 1, to: offset + items.length, total })}</span>
         <button type="button" disabled={!canNext || loading} onClick={() => load(offset + ADMIN_LOGIN_LOGS_PAGE_SIZE, eventType, q)}>
-          次へ →
+          {t('admin.nextPage')}
         </button>
       </div>
     </section>
@@ -2610,6 +3119,7 @@ function AdminLoginLogs() {
 // ADMIN_EMAILS/ADMIN_USER_IDSに該当しないユーザーには403を返すので、
 // その場合はここでエラーメッセージだけを表示する。
 function AdminDashboard({ onLogout, onBack }) {
+  const { lang, t } = useLanguage()
   const [data, setData] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -2621,17 +3131,17 @@ function AdminDashboard({ onLogout, onBack }) {
     try {
       const resp = await apiFetch('/admin/overview')
       if (resp.status === 403) {
-        setError('このアカウントには管理者権限がありません。')
+        setError(t('admin.noPermission'))
         return
       }
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       setData(await resp.json())
     } catch (e) {
-      setError(e.message || '読み込みに失敗しました。')
+      setError(e.message || t('admin.loadFailed'))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     load()
@@ -2645,13 +3155,13 @@ function AdminDashboard({ onLogout, onBack }) {
         <span className="topbar-title"># admin</span>
         <div className="topbar-spacer" />
         <button type="button" className="topbar-search" onClick={load} disabled={loading}>
-          更新
+          {t('admin.refresh')}
         </button>
         <button type="button" className="topbar-search" onClick={onBack}>
-          アプリに戻る
+          {t('admin.backToApp')}
         </button>
         <button type="button" className="topbar-search" onClick={onLogout}>
-          ログアウト
+          {t('admin.logout')}
         </button>
       </div>
 
@@ -2661,70 +3171,73 @@ function AdminDashboard({ onLogout, onBack }) {
           className={tab === 'overview' ? 'active' : ''}
           onClick={() => setTab('overview')}
         >
-          概要
+          {t('admin.tabOverview')}
         </button>
         <button
           type="button"
           className={tab === 'logins' ? 'active' : ''}
           onClick={() => setTab('logins')}
         >
-          ログイン履歴
+          {t('admin.tabLogins')}
         </button>
       </div>
 
       <div className="admin-body">
         {tab === 'overview' && (
           <>
-            {loading && !data && <div className="app-loading">読み込み中…</div>}
+            {loading && !data && <div className="app-loading">{t('admin.loading')}</div>}
             {error && <div className="error admin-error">{error}</div>}
 
             {data && (
               <>
                 <div className="admin-grid">
                   <AdminStat
-                    label="総ユーザー数"
+                    label={t('admin.totalUsers')}
                     value={data.users.total}
-                    sub={`直近7日 +${data.users.new_7d}人 / 直近30日 +${data.users.new_30d}人`}
+                    sub={t('admin.totalUsersSub', { d7: data.users.new_7d, d30: data.users.new_30d })}
                   />
                   <AdminStat
-                    label="アクティブユーザー(24時間)"
+                    label={t('admin.activeUsers24h')}
                     value={data.users.active_24h}
-                    sub={`直近7日では${data.users.active_7d}人`}
+                    sub={t('admin.activeUsers24hSub', { n: data.users.active_7d })}
                   />
                   <AdminStat
-                    label="有料ユーザー"
+                    label={t('admin.payingUsers')}
                     value={data.plans.paying}
-                    sub={`Pro ${data.plans.pro}人 / Max ${data.plans.max}人 / Free ${data.plans.free}人`}
+                    sub={t('admin.payingUsersSub', { pro: data.plans.pro, max: data.plans.max, free: data.plans.free })}
                   />
                   <AdminStat
-                    label="今期のトークン利用量(全ユーザー合計)"
-                    value={data.usage.tokens_used_this_period.toLocaleString('ja-JP')}
-                    sub="ユーザーごとに月初(UTC)でロールオーバー"
+                    label={t('admin.tokensThisPeriod')}
+                    value={data.usage.tokens_used_this_period.toLocaleString(localeFor(lang))}
+                    sub={t('admin.tokensThisPeriodSub')}
                   />
                   <AdminStat
-                    label="生成件数(累計)"
+                    label={t('admin.totalGenerations')}
                     value={data.generations.total}
-                    sub={`直近7日 ${data.generations.last_7d}件 / 直近30日 ${data.generations.last_30d}件`}
+                    sub={t('admin.totalGenerationsSub', { d7: data.generations.last_7d, d30: data.generations.last_30d })}
                   />
                 </div>
 
                 <section className="section-card admin-events">
                   <div className="admin-events-header">
-                    <h3>直近のセキュリティイベント</h3>
+                    <h3>{t('admin.recentSecurityEvents')}</h3>
                     <button type="button" className="admin-events-see-all" onClick={() => setTab('logins')}>
-                      すべて見る →
+                      {t('admin.seeAll')}
                     </button>
                   </div>
                   {data.recent_security_events.length === 0 ? (
-                    <p className="security-panel-hint">まだ記録がありません。</p>
+                    <p className="security-panel-hint">{t('admin.noRecords')}</p>
                   ) : (
                     <ul className="security-event-list">
                       {data.recent_security_events.map((ev, i) => (
                         <li key={i}>
-                          <span className="security-event-type">{formatEventType(ev.event_type)}</span>
-                          <span className="admin-event-subject">{ev.subject}</span>
+                          <span className="security-event-type">{formatEventType(ev.event_type, t)}</span>
+                          <span className="admin-event-subject">
+                            {ev.subject}
+                            {ev.subject_email && ev.subject_email !== ev.subject && ` (${ev.subject_email})`}
+                          </span>
                           <span className="security-event-date">
-                            {new Date(ev.created_at).toLocaleString('ja-JP', {
+                            {new Date(ev.created_at).toLocaleString(localeFor(lang), {
                               month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
                             })}
                           </span>
@@ -2734,7 +3247,7 @@ function AdminDashboard({ onLogout, onBack }) {
                   )}
                 </section>
 
-                <p className="admin-generated-at">最終更新: {new Date(data.generated_at).toLocaleString('ja-JP')}</p>
+                <p className="admin-generated-at">{t('admin.lastUpdated', { date: new Date(data.generated_at).toLocaleString(localeFor(lang)) })}</p>
               </>
             )}
           </>
@@ -2747,10 +3260,13 @@ function AdminDashboard({ onLogout, onBack }) {
 }
 
 export default function App() {
+  const { lang, t } = useLanguage()
+
   // どのチャンネル(機能)を表示するか。'home'=利用時間の確認とクイックスタート、
   // 'outline'=論文アウトライン生成、'logic-guide'=大学授業案内チャット、
   // 'tasks'=学習タスクの所要時間見積もり・リマインド、'task-generator'=課題の成果物(文章・Excel等)の生成、
-  // 'study-notes'=レポート・資料から暗記すべき要点や流れを整理。
+  // 'study-notes'=レポート・資料から暗記すべき要点や流れを整理、
+  // 'ai-agents'=知識レベル・立場に合わせた経済(Economics)・金融(Finance)の状況解説チャット。
   const [channel, setChannel] = useState('home')
 
   // スマホ幅ではサイドバーをオフキャンバス(ドロワー)化するための開閉状態。
@@ -2898,7 +3414,7 @@ export default function App() {
       const data = await resp.json()
       window.location.href = data.checkout_url
     } catch (err) {
-      setSidebarError(`アップグレードに失敗しました: ${String(err)}`)
+      setSidebarError(`${t('errors.upgradeFailed')}: ${String(err)}`)
       setBillingLoading(false)
     }
   }
@@ -2912,7 +3428,7 @@ export default function App() {
       const data = await resp.json()
       window.location.href = data.portal_url
     } catch (err) {
-      setSidebarError(`プラン管理画面を開けませんでした: ${String(err)}`)
+      setSidebarError(`${t('errors.managePlanFailed')}: ${String(err)}`)
       setBillingLoading(false)
     }
   }
@@ -2927,7 +3443,7 @@ export default function App() {
 
   function confirmDiscardComposerIfNeeded() {
     if (!composerDirty) return true
-    return window.confirm('入力中のテーマや添付ファイル(未送信)は失われます。このまま続けますか？')
+    return window.confirm(t('confirm.discardComposer'))
   }
 
   // タブ(セッション)はサーバー側SQLiteに保存し、ブラウザを変えても復元できるようにする。
@@ -2948,11 +3464,11 @@ export default function App() {
           const data = await resp.json()
           items = data.items ?? []
         } else {
-          setSidebarError(`タブの読み込みに失敗しました: ${await readErrorMessage(resp)}`)
+          setSidebarError(`${t('errors.tabsLoadFailed')}: ${await readErrorMessage(resp)}`)
         }
       } catch (err) {
         // サーバーに接続できない場合は後段のフォールバックで単一タブとして動作する
-        setSidebarError(`タブの読み込みに失敗しました: ${String(err)}`)
+        setSidebarError(`${t('errors.tabsLoadFailed')}: ${String(err)}`)
       }
 
       if (items.length === 0) {
@@ -3007,12 +3523,12 @@ export default function App() {
       })
         .then(async (resp) => {
           if (!resp.ok) {
-            setSidebarError(`タブの保存に失敗しました: ${await readErrorMessage(resp)}`)
+            setSidebarError(`${t('errors.tabsSaveFailed')}: ${await readErrorMessage(resp)}`)
           }
         })
         .catch((err) => {
           // 保存に失敗しても画面は止めない(次の変更時に再送される)が、原因は表示する
-          setSidebarError(`タブの保存に失敗しました: ${String(err)}`)
+          setSidebarError(`${t('errors.tabsSaveFailed')}: ${String(err)}`)
         })
     })
   }, [sessions, sessionsLoaded])
@@ -3038,13 +3554,13 @@ export default function App() {
       const base = mode === 'outline' ? '/history' : '/mode-history'
       const resp = await apiFetch(`${base}${params.toString() ? `?${params}` : ''}`)
       if (!resp.ok) {
-        setSidebarError(`履歴の取得に失敗しました: ${await readErrorMessage(resp)}`)
+        setSidebarError(`${t('errors.historyLoadFailed')}: ${await readErrorMessage(resp)}`)
         return
       }
       const data = await resp.json()
       setHistoryItems(data.items ?? [])
     } catch (err) {
-      setSidebarError(`履歴の取得に失敗しました: ${String(err)}`)
+      setSidebarError(`${t('errors.historyLoadFailed')}: ${String(err)}`)
     }
   }, [])
 
@@ -3066,16 +3582,16 @@ export default function App() {
 
   async function handleDeleteHistoryItem(e, id) {
     e.stopPropagation()
-    if (!window.confirm('この履歴を削除しますか？')) return
+    if (!window.confirm(t('confirm.deleteHistory'))) return
     try {
       const resp = await apiFetch(`${historyBase}/${id}`, { method: 'DELETE' })
       if (resp.ok) {
         refreshHistory()
       } else {
-        setSidebarError(`履歴の削除に失敗しました: ${await readErrorMessage(resp)}`)
+        setSidebarError(`${t('errors.historyDeleteFailed')}: ${await readErrorMessage(resp)}`)
       }
     } catch (err) {
-      setSidebarError(`履歴の削除に失敗しました: ${String(err)}`)
+      setSidebarError(`${t('errors.historyDeleteFailed')}: ${String(err)}`)
     }
   }
 
@@ -3090,10 +3606,10 @@ export default function App() {
       if (resp.ok) {
         refreshHistory()
       } else {
-        setSidebarError(`シークレット設定の変更に失敗しました: ${await readErrorMessage(resp)}`)
+        setSidebarError(`${t('errors.privacyChangeFailed')}: ${await readErrorMessage(resp)}`)
       }
     } catch (err) {
-      setSidebarError(`シークレット設定の変更に失敗しました: ${String(err)}`)
+      setSidebarError(`${t('errors.privacyChangeFailed')}: ${String(err)}`)
     }
   }
 
@@ -3118,7 +3634,7 @@ export default function App() {
     if (!confirmDiscardComposerIfNeeded()) return
     const created = await createSessionOnServer(NEW_TAB_TITLE)
     if (!created) {
-      setSidebarError('新しいタブの作成に失敗しました。サーバーへの接続やAPIキーを確認してください。')
+      setSidebarError(t('errors.newTabFailed'))
       return
     }
     savedSnapshots.current[created.id] = JSON.stringify({ title: created.title, messages: created.messages })
@@ -3132,12 +3648,12 @@ export default function App() {
       try {
         const resp = await apiFetch(`/mode-history/${item.id}`)
         if (!resp.ok) {
-          setSidebarError(`履歴の読み込みに失敗しました: ${await readErrorMessage(resp)}`)
+          setSidebarError(`${t('errors.historyOpenFailed')}: ${await readErrorMessage(resp)}`)
           return
         }
         setHistoryPreview(await resp.json())
       } catch (err) {
-        setSidebarError(`履歴の読み込みに失敗しました: ${String(err)}`)
+        setSidebarError(`${t('errors.historyOpenFailed')}: ${String(err)}`)
       }
       return
     }
@@ -3146,14 +3662,14 @@ export default function App() {
     try {
       const resp = await apiFetch(`/history/${item.id}`)
       if (!resp.ok) {
-        setSidebarError(`履歴の読み込みに失敗しました: ${await readErrorMessage(resp)}`)
+        setSidebarError(`${t('errors.historyOpenFailed')}: ${await readErrorMessage(resp)}`)
         return
       }
       const record = await resp.json()
 
       const created = await createSessionOnServer((record.title || NEW_TAB_TITLE).slice(0, 20))
       if (!created) {
-        setSidebarError('新しいタブの作成に失敗しました。サーバーへの接続やAPIキーを確認してください。')
+        setSidebarError(t('errors.newTabFailed'))
         return
       }
 
@@ -3173,7 +3689,7 @@ export default function App() {
       setSessions((prev) => [...prev, { ...created, messages }])
       setActiveId(created.id)
     } catch (err) {
-      setSidebarError(`履歴の読み込みに失敗しました: ${String(err)}`)
+      setSidebarError(`${t('errors.historyOpenFailed')}: ${String(err)}`)
     }
   }
 
@@ -3231,24 +3747,24 @@ export default function App() {
     const items = [
       {
         kind: 'MODE',
-        label: '# home  利用時間の確認とクイックスタート',
+        label: `# home  ${t('home.homeDesc')}`,
         hint: '',
         run: () => { selectChannel('home'); closePalette() },
       },
-      ...MODE_DEFS.map((m) => ({
+      ...ALL_MODE_DEFS.map((m) => ({
         kind: 'MODE',
-        label: `${m.tag}  ${m.short}`,
+        label: `${m.tag}  ${t(m.short)}`,
         hint: m.key,
         run: () => { selectChannel(m.id); closePalette() },
       })),
     ]
     if (channel === 'outline') {
       historyItems.slice(0, 8).forEach((h) => {
-        items.push({ kind: '履歴', label: h.title, hint: '', run: () => { openHistoryItem(h); closePalette() } })
+        items.push({ kind: t('sidebar.history'), label: h.title, hint: '', run: () => { openHistoryItem(h); closePalette() } })
       })
-      items.push({ kind: 'CMD', label: '新規スレッド', hint: '⌘N', run: () => { closePalette(); addTab() } })
+      items.push({ kind: 'CMD', label: t('palette.newThread'), hint: '⌘N', run: () => { closePalette(); addTab() } })
     }
-    items.push({ kind: 'CMD', label: 'ログアウト', hint: '', run: () => { closePalette(); handleLogout() } })
+    items.push({ kind: 'CMD', label: t('palette.logout'), hint: '', run: () => { closePalette(); handleLogout() } })
     return q ? items.filter((it) => it.label.toLowerCase().includes(q)) : items
   }
 
@@ -3268,7 +3784,7 @@ export default function App() {
     }
   }
 
-  // ⌘K パレット、⌘1-5 モード切り替え、⌘N 新規スレッド(outlineのみ)。依存配列を付けず
+  // ⌘K パレット、⌘1-6 モード切り替え、⌘N 新規スレッド(outlineのみ)。依存配列を付けず
   // 毎レンダー後に張り直すことで、ハンドラ内から常に最新のchannel/historyItems等を参照できる。
   useEffect(() => {
     function onKeyDown(e) {
@@ -3279,9 +3795,9 @@ export default function App() {
       } else if (meta && e.key.toLowerCase() === 'n' && channel === 'outline') {
         e.preventDefault()
         addTab()
-      } else if (meta && ['1', '2', '3', '4', '5'].includes(e.key)) {
+      } else if (meta && ['1', '2', '3', '4', '5', '6'].includes(e.key)) {
         e.preventDefault()
-        const mode = MODE_DEFS[Number(e.key) - 1]
+        const mode = ALL_MODE_DEFS[Number(e.key) - 1]
         if (mode) selectChannel(mode.id)
       } else if (e.key === 'Escape' && paletteOpen) {
         closePalette()
@@ -3299,14 +3815,14 @@ export default function App() {
     ? outlineMessages[outlineMessages.length - 1]
     : null
 
-  const activeMode = MODE_DEFS.find((m) => m.id === channel) ?? MODE_DEFS[0]
+  const activeMode = ALL_MODE_DEFS.find((m) => m.id === channel) ?? ALL_MODE_DEFS[0]
   // outlineモードだけスレッド(セッション)を持つので、タイトルはそのタブ名を表示する。
   // それ以外のモードは単一のスレッドしかないので、モードのタグ名を代わりに出す。
   const topbarTitle =
     channel === 'home' ? '# home' : channel === 'outline' ? (activeSession?.title || NEW_TAB_TITLE) : activeMode.tag
 
   if (authExchanging) {
-    return <div className="app-root app-loading">サインイン処理中…</div>
+    return <div className="app-root app-loading">{t('common.signingIn')}</div>
   }
 
   if (!authToken) {
@@ -3318,7 +3834,7 @@ export default function App() {
   }
 
   if (!sessionsLoaded || !activeSession) {
-    return <div className="app-root app-loading">読み込み中…</div>
+    return <div className="app-root app-loading">{t('home.loading')}</div>
   }
 
   return (
@@ -3327,7 +3843,7 @@ export default function App() {
         <button
           type="button"
           className="sidebar-toggle"
-          aria-label="メニューを開く"
+          aria-label={t('topbar.menuLabel')}
           onClick={() => setSidebarOpen(true)}
         >
           <Menu aria-hidden="true" />
@@ -3337,10 +3853,10 @@ export default function App() {
         <span className="topbar-title">{topbarTitle}</span>
         <div className="topbar-spacer" />
         <button type="button" className="topbar-search" onClick={openPalette}>
-          モード・履歴を検索<span className="topbar-kbd">⌘K</span>
+          {t('topbar.search')}<span className="topbar-kbd">⌘K</span>
         </button>
         {usage && (
-          <span className="topbar-plan">{usage.plan === 'free' ? 'FREE' : usage.plan === 'pro' ? 'PRO' : 'MAX'}</span>
+          <span className="topbar-plan">{usage.plan === 'free' ? t('topbar.planFree') : usage.plan === 'pro' ? t('topbar.planPro') : t('topbar.planMax')}</span>
         )}
       </div>
 
@@ -3361,7 +3877,7 @@ export default function App() {
                 <button
                   type="button"
                   className="tab-close"
-                  aria-label={`タブ「${s.title}」を閉じる`}
+                  aria-label={t('topbar.closeTabAria', { title: s.title })}
                   onClick={(e) => { e.stopPropagation(); closeTab(s.id) }}
                 >
                   ×
@@ -3369,7 +3885,7 @@ export default function App() {
               )}
             </div>
           ))}
-          <button type="button" className="tab-add" aria-label="新しいタブを追加" onClick={addTab}><Plus aria-hidden="true" /></button>
+          <button type="button" className="tab-add" aria-label={t('topbar.newTabAria')} onClick={addTab}><Plus aria-hidden="true" /></button>
         </div>
       )}
 
@@ -3379,7 +3895,7 @@ export default function App() {
           <button
             type="button"
             className="global-error-dismiss"
-            aria-label="エラーを閉じる"
+            aria-label={t('topbar.closeError')}
             onClick={() => setSidebarError(null)}
           >
             ×
@@ -3397,7 +3913,7 @@ export default function App() {
             <button
               type="button"
               className="sidebar-close"
-              aria-label="メニューを閉じる"
+              aria-label={t('sidebar.closeMenu')}
               onClick={() => setSidebarOpen(false)}
             >
               ×
@@ -3412,8 +3928,8 @@ export default function App() {
             >
               <span className="mode-item-bar" />
               <span className="mode-item-body">
-                <span className="mode-item-tag"><House aria-hidden="true" /> home</span>
-                <span className="mode-item-short">利用時間の確認とクイックスタート</span>
+                <span className="mode-item-tag"><House aria-hidden="true" /> {t('home.home')}</span>
+                <span className="mode-item-short">{t('home.homeDesc')}</span>
               </span>
             </button>
             {MODE_DEFS.map((m) => (
@@ -3427,7 +3943,27 @@ export default function App() {
                 <span className="mode-item-bar" />
                 <span className="mode-item-body">
                   <span className="mode-item-tag">{m.tag}</span>
-                  <span className="mode-item-short">{m.short}</span>
+                  <span className="mode-item-short">{t(m.short)}</span>
+                </span>
+                <span className="mode-item-key">{m.key}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="mode-section-label">{t('sidebar.aiAgentsSectionLabel')}</div>
+          <div className="mode-list">
+            {AI_AGENT_DEFS.map((m) => (
+              <button
+                type="button"
+                key={m.id}
+                aria-label={m.tag}
+                className={`mode-item ${channel === m.id ? 'active' : ''}`}
+                onClick={() => selectChannel(m.id)}
+              >
+                <span className="mode-item-bar" />
+                <span className="mode-item-body">
+                  <span className="mode-item-tag">{m.tag}</span>
+                  <span className="mode-item-short">{t(m.short)}</span>
                 </span>
                 <span className="mode-item-key">{m.key}</span>
               </button>
@@ -3438,9 +3974,9 @@ export default function App() {
           <div className="sidebar-history">
             <div className="sidebar-history-header">
               <div className="sidebar-history-title">
-                {showSecretHistory ? `シークレット履歴・${activeMode.tag}` : `履歴・${activeMode.tag}`}
+                {showSecretHistory ? t('sidebar.secretHistoryOf', { mode: activeMode.tag }) : t('sidebar.historyOf', { mode: activeMode.tag })}
               </div>
-              <label className="secret-toggle" title="シークレット履歴を表示">
+              <label className="secret-toggle" title={t('sidebar.secretToggleTitle')}>
                 <input
                   type="checkbox"
                   checked={showSecretHistory}
@@ -3452,17 +3988,17 @@ export default function App() {
             <input
               type="search"
               className="sidebar-history-search"
-              placeholder="履歴を検索"
+              placeholder={t('sidebar.searchHistory')}
               value={historyQuery}
               onChange={(e) => setHistoryQuery(e.target.value)}
             />
             {historyItems.length === 0 ? (
               <div className="sidebar-history-empty">
                 {historyQuery.trim()
-                  ? '該当する履歴がありません'
+                  ? t('sidebar.noHistoryMatch')
                   : showSecretHistory
-                  ? 'シークレット履歴はまだありません'
-                  : 'まだ生成履歴がありません'}
+                  ? t('sidebar.noSecretHistory')
+                  : t('sidebar.noHistory')}
               </div>
             ) : (
               <ul className="sidebar-history-list">
@@ -3471,7 +4007,7 @@ export default function App() {
                     <button type="button" className="history-item-open" onClick={() => openHistoryItem(item)}>
                       <span className="history-item-title">{item.title}</span>
                       <span className="history-item-date">
-                        {new Date(item.created_at).toLocaleString('ja-JP', {
+                        {new Date(item.created_at).toLocaleString(localeFor(lang), {
                           month: 'numeric',
                           day: 'numeric',
                           hour: '2-digit',
@@ -3482,8 +4018,8 @@ export default function App() {
                     <button
                       type="button"
                       className="history-item-privacy-toggle"
-                      title={item.is_private ? '公開に戻す' : 'シークレットにする'}
-                      aria-label={`${item.title}を${item.is_private ? '公開に戻す' : 'シークレットにする'}`}
+                      title={item.is_private ? t('sidebar.makePublic') : t('sidebar.makePrivate')}
+                      aria-label={item.is_private ? t('sidebar.makePublicAria', { title: item.title }) : t('sidebar.makePrivateAria', { title: item.title })}
                       onClick={(e) => handleTogglePrivacy(e, item)}
                     >
                       {item.is_private ? <LockKeyhole aria-hidden="true" /> : <LockKeyholeOpen aria-hidden="true" />}
@@ -3491,8 +4027,8 @@ export default function App() {
                     <button
                       type="button"
                       className="history-item-delete"
-                      title="この履歴を削除"
-                      aria-label={`${item.title}を削除`}
+                      title={t('sidebar.deleteHistory')}
+                      aria-label={t('sidebar.deleteItemAria', { title: item.title })}
                       onClick={(e) => handleDeleteHistoryItem(e, item.id)}
                     >
                       <Trash2 aria-hidden="true" />
@@ -3502,8 +4038,8 @@ export default function App() {
               </ul>
             )}
             {channel === 'outline' && (
-              <button type="button" className="sidebar-new-thread" aria-label="新規スレッド" onClick={addTab}>
-                <Plus aria-hidden="true" /> 新規スレッド <span className="topbar-kbd">⌘N</span>
+              <button type="button" className="sidebar-new-thread" aria-label={t('sidebar.newThread')} onClick={addTab}>
+                <Plus aria-hidden="true" /> {t('sidebar.newThread')} <span className="topbar-kbd">⌘N</span>
               </button>
             )}
           </div>
@@ -3513,8 +4049,8 @@ export default function App() {
             {usage && (
               <div className={`usage-indicator ${usage.tokens_used >= usage.tokens_quota ? 'usage-indicator-over' : ''}`}>
                 <div className="usage-indicator-row">
-                  <span>TOKENS · 今月</span>
-                  <span>{usage.tokens_used.toLocaleString()} / {usage.tokens_quota.toLocaleString()}</span>
+                  <span>{t('sidebar.tokensThisMonth')}</span>
+                  <span>{usage.tokens_used.toLocaleString(localeFor(lang))} / {usage.tokens_quota.toLocaleString(localeFor(lang))}</span>
                 </div>
                 <div className="usage-meter">
                   <div
@@ -3533,7 +4069,7 @@ export default function App() {
                   disabled={billingLoading}
                   onClick={() => handleUpgrade('pro')}
                 >
-                  Proにアップグレード
+                  {t('sidebar.upgradePro')}
                 </button>
                 <button
                   type="button"
@@ -3541,7 +4077,7 @@ export default function App() {
                   disabled={billingLoading}
                   onClick={() => handleUpgrade('max')}
                 >
-                  Maxにアップグレード
+                  {t('sidebar.upgradeMax')}
                 </button>
               </div>
             ) : (
@@ -3552,7 +4088,7 @@ export default function App() {
                   disabled={billingLoading}
                   onClick={handleManageBilling}
                 >
-                  プランを管理
+                  {t('sidebar.managePlan')}
                 </button>
               )
             )}
@@ -3563,22 +4099,23 @@ export default function App() {
                 className="security-settings-button"
                 onClick={() => navigate('/admin')}
               >
-                <LayoutDashboard aria-hidden="true" /> 管理ダッシュボード
+                <LayoutDashboard aria-hidden="true" /> {t('sidebar.adminDashboard')}
               </button>
             )}
-            <button type="button" className="security-settings-button" aria-label="🔒 セキュリティ設定" onClick={() => setShowSecurityPanel(true)}>
-              <ShieldCheck aria-hidden="true" /> セキュリティ設定
+            <button type="button" className="security-settings-button" aria-label={`🔒 ${t('sidebar.securitySettings')}`} onClick={() => setShowSecurityPanel(true)}>
+              <ShieldCheck aria-hidden="true" /> {t('sidebar.securitySettings')}
             </button>
             <button type="button" className="logout-button" onClick={handleLogout}>
-              ログアウト
+              {t('sidebar.logout')}
             </button>
+            <LanguageSwitcher className="sidebar-language-switcher" />
           </div>
         </aside>
 
         {showSecurityPanel && (
           <div className="security-panel-overlay" onClick={() => setShowSecurityPanel(false)}>
             <div onClick={(e) => e.stopPropagation()}>
-              <SecuritySettings onClose={() => setShowSecurityPanel(false)} />
+              <SecuritySettings onClose={() => setShowSecurityPanel(false)} onTokenRefresh={setAuthToken} />
             </div>
           </div>
         )}
@@ -3590,7 +4127,7 @@ export default function App() {
             <>
               <header className="main-header">
                 <h1># outline-generator</h1>
-                <p>テーマ・参考資料・フォーマット指定を送ると、調査アウトラインと関連文献を生成します</p>
+                <p>{t('modes.outlineShort')}</p>
               </header>
 
               <Workspace
@@ -3606,7 +4143,7 @@ export default function App() {
             <>
               <header className="main-header">
                 <h1># logic-guide</h1>
-                <p>大学・学部・学科を選んで、気になる授業内容をAIに質問できます</p>
+                <p>{t('modes.logicGuideShort')}</p>
               </header>
 
               <CourseGuide onGenerated={refreshHistory} />
@@ -3615,7 +4152,7 @@ export default function App() {
             <>
               <header className="main-header">
                 <h1># task-reminders</h1>
-                <p>タスク内容を送ると、AIが所要時間を見積もり、頃合いにメールでリマインドします</p>
+                <p>{t('modes.taskRemindersShort')}</p>
               </header>
 
               <TaskReminders onGenerated={refreshHistory} />
@@ -3624,19 +4161,28 @@ export default function App() {
             <>
               <header className="main-header">
                 <h1># task-generator</h1>
-                <p>課題の内容を送ると、AIが文章やExcelの表など、実際に提出できる成果物を作成します</p>
+                <p>{t('modes.taskGeneratorShort')}</p>
               </header>
 
               <TaskGenerator onGenerated={refreshHistory} />
             </>
-          ) : (
+          ) : channel === 'study-notes' ? (
             <>
               <header className="main-header">
                 <h1># study-notes</h1>
-                <p>レポート・資料を貼り付けるか添付すると、暗記すべき要点と全体の流れを整理します</p>
+                <p>{t('modes.studyNotesShort')}</p>
               </header>
 
               <StudyNotes onGenerated={refreshHistory} />
+            </>
+          ) : (
+            <>
+              <header className="main-header">
+                <h1># ai-agents</h1>
+                <p>{t('modes.aiAgentsShort')}</p>
+              </header>
+
+              <AiAgents onGenerated={refreshHistory} />
             </>
           )}
         </div>
