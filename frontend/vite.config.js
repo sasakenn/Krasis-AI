@@ -23,8 +23,9 @@ export default defineConfig({
       '/mode-history': 'http://127.0.0.1:8000',
       '/activity': 'http://127.0.0.1:8000',
       // '/admin'自体はSPAのページパス(AdminDashboard)なのでプロキシせず、
-      // APIパスの'/admin/overview'だけをバックエンドへ転送する。
-      '/admin/overview': 'http://127.0.0.1:8000'
+      // '/admin/'配下のAPIパスだけをバックエンドへ転送する。
+      '/admin/overview': 'http://127.0.0.1:8000',
+      '/admin/logins': 'http://127.0.0.1:8000'
     }
   },
   test: {
