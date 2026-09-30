@@ -1083,3 +1083,187 @@ def get_admin_overview() -> dict:
         },
         "recent_security_events": recent_security_events,
     }
+
+
+# 運営者向け「プロンプト分析」向け。generations(論文アウトライン)は元々topic/fieldが
+# 平文列なので復号不要。history_entriesは各モードの入力プロンプトの短い要約が平文の
+# titleに入っている(logic-guide/ai-agentsは大学・分野等のラベル、tasks/task-generator/
+# study-notesは実際の依頼文の先頭60文字)ため、一覧はこのtitleだけで復号せずに済ませ、
+# 会話全文などの詳細を見たい場合だけ get_prompt_entry_detail() で都度復号する。
+_PROMPT_HISTORY_MODES = ("logic-guide", "ai-agents", "task-generator", "study-notes", "tasks")
+
+# キーワード頻度集計用の簡易ストップワード(助詞・汎用語)。形態素解析はせず、
+# 英数字の連続 / ひらがな・カタカナ・漢字の連続を単純に1トークンとして扱う荒い方式なので、
+# 出現しやすい機能語だけ手動で除外してノイズを減らす。
+_KEYWORD_STOPWORDS = {
+    "の", "を", "に", "は", "が", "で", "と", "も", "や", "へ", "から", "まで", "より",
+    "ため", "こと", "もの", "これ", "それ", "あれ", "この", "その", "あの", "です", "ます",
+    "する", "した", "して", "いる", "ある", "ない", "について", "における", "です", "ください",
+}
+
+
+def _tokenize_for_keywords(text: str) -> list[str]:
+    import re
+
+    if not text:
+        return []
+    tokens = re.findall(r"[A-Za-z0-9]+|[぀-ヿ一-鿿]+", text)
+    return [t for t in tokens if len(t) >= 2 and t not in _KEYWORD_STOPWORDS]
+
+
+def get_prompt_analytics() -> dict:
+    """運営者向け「プロンプト分析」タブの集計値(機能別件数・よく使われる分野・
+    頻出キーワード)。個別ユーザーの会話全文は読まず、平文の要約列だけを見る。
+    """
+    now = datetime.now(timezone.utc)
+    since_7d = (now - timedelta(days=7)).isoformat()
+    since_30d = (now - timedelta(days=30)).isoformat()
+
+    with _connect() as conn:
+        def _counts(where_extra: str = "", params: tuple = ()) -> dict:
+            total = conn.execute(
+                f"SELECT COUNT(*) AS n FROM generations WHERE 1=1 {where_extra}", params
+            ).fetchone()["n"]
+            return total
+
+        mode_counts: dict[str, dict[str, int]] = {}
+        mode_counts["outline"] = {
+            "total": conn.execute("SELECT COUNT(*) AS n FROM generations").fetchone()["n"],
+            "last_7d": conn.execute(
+                "SELECT COUNT(*) AS n FROM generations WHERE created_at >= ?", (since_7d,)
+            ).fetchone()["n"],
+            "last_30d": conn.execute(
+                "SELECT COUNT(*) AS n FROM generations WHERE created_at >= ?", (since_30d,)
+            ).fetchone()["n"],
+        }
+        for mode in _PROMPT_HISTORY_MODES:
+            mode_counts[mode] = {
+                "total": conn.execute(
+                    "SELECT COUNT(*) AS n FROM history_entries WHERE mode = ?", (mode,)
+                ).fetchone()["n"],
+                "last_7d": conn.execute(
+                    "SELECT COUNT(*) AS n FROM history_entries WHERE mode = ? AND created_at >= ?",
+                    (mode, since_7d),
+                ).fetchone()["n"],
+                "last_30d": conn.execute(
+                    "SELECT COUNT(*) AS n FROM history_entries WHERE mode = ? AND created_at >= ?",
+                    (mode, since_30d),
+                ).fetchone()["n"],
+            }
+
+        top_fields = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT field, COUNT(*) AS n FROM generations GROUP BY field ORDER BY n DESC LIMIT 10"
+            ).fetchall()
+        ]
+
+        texts = [row["topic"] for row in conn.execute("SELECT topic FROM generations").fetchall()]
+        texts += [row["title"] for row in conn.execute("SELECT title FROM history_entries").fetchall()]
+
+    keyword_counter: dict[str, int] = {}
+    for text in texts:
+        for token in _tokenize_for_keywords(text or ""):
+            keyword_counter[token] = keyword_counter.get(token, 0) + 1
+    top_keywords = [
+        {"keyword": k, "count": c}
+        for k, c in sorted(keyword_counter.items(), key=lambda kv: kv[1], reverse=True)[:20]
+    ]
+
+    return {
+        "generated_at": now.isoformat(),
+        "counts_by_mode": mode_counts,
+        "top_fields": top_fields,
+        "top_keywords": top_keywords,
+    }
+
+
+def list_prompt_entries(
+    limit: int = 50,
+    offset: int = 0,
+    mode: str | None = None,
+    q: str | None = None,
+) -> tuple[list[dict], int]:
+    """運営者向け「プロンプト分析」の個別一覧。会話全文は含めず、平文の要約
+    (topic/title)だけをページング・絞り込みして返す(items, total件数)。
+    """
+    where = []
+    params: list = []
+    if mode:
+        where.append("mode = ?")
+        params.append(mode)
+    if q:
+        where.append("(summary LIKE ? OR user_id LIKE ?)")
+        like = f"%{q}%"
+        params.extend([like, like])
+    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+
+    union_sql = """
+        SELECT id, user_id, created_at, 'outline' AS mode, topic AS summary,
+               field AS extra, 'generations' AS source
+        FROM generations
+        UNION ALL
+        SELECT id, user_id, created_at, mode, title AS summary,
+               NULL AS extra, 'history_entries' AS source
+        FROM history_entries
+    """
+
+    with _connect() as conn:
+        total = conn.execute(
+            f"SELECT COUNT(*) AS n FROM ({union_sql}) {where_sql}", params
+        ).fetchone()["n"]
+        rows = conn.execute(
+            f"""
+            SELECT p.id, p.user_id, p.created_at, p.mode, p.summary, p.extra, p.source, u.email AS subject_email
+            FROM ({union_sql}) p
+            LEFT JOIN users u ON u.id = p.user_id
+            {where_sql}
+            ORDER BY p.created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [limit, offset],
+        ).fetchall()
+
+    return [dict(row) for row in rows], total
+
+
+def get_prompt_entry_detail(source: str, entry_id: int) -> dict | None:
+    """運営者が個別の記録を選んで初めて復号する詳細ビュー。一覧(list_prompt_entries)
+    では会話全文・生成結果を読まずに済ませ、必要な時だけここで復号する。
+    """
+    with _connect() as conn:
+        if source == "generations":
+            row = conn.execute(
+                """
+                SELECT g.id, g.user_id, g.created_at, g.topic, g.field, g.target_length,
+                       g.title, g.outline_json, u.email AS subject_email
+                FROM generations g
+                LEFT JOIN users u ON u.id = g.user_id
+                WHERE g.id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            result = dict(row)
+            result["outline"] = json.loads(decrypt_text(result.pop("outline_json")))
+            return result
+
+        if source == "history_entries":
+            row = conn.execute(
+                """
+                SELECT h.id, h.user_id, h.mode, h.created_at, h.updated_at, h.title,
+                       h.payload_json, u.email AS subject_email
+                FROM history_entries h
+                LEFT JOIN users u ON u.id = h.user_id
+                WHERE h.id = ?
+                """,
+                (entry_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            result = dict(row)
+            result["payload"] = json.loads(decrypt_text(result.pop("payload_json")))
+            return result
+
+    raise ValueError(f"unknown source: {source}")

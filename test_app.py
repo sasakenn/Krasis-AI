@@ -720,6 +720,95 @@ def test_oauth_login_failure_is_recorded_as_security_event():
     assert logins.json()["total"] >= 1
 
 
+def test_admin_prompts_analytics_rejects_non_admin_user():
+    resp = client.get("/admin/prompts/analytics", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert resp.status_code == 403
+
+
+def test_admin_prompts_analytics_returns_counts_and_keywords():
+    resp = client.get("/admin/prompts/analytics")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "outline" in body["counts_by_mode"]
+    assert set(body["counts_by_mode"]["outline"].keys()) == {"total", "last_7d", "last_30d"}
+    assert isinstance(body["top_fields"], list)
+    assert isinstance(body["top_keywords"], list)
+
+
+def test_admin_prompts_list_rejects_non_admin_user():
+    resp = client.get("/admin/prompts", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert resp.status_code == 403
+
+
+def test_admin_prompts_list_includes_outline_and_history_entries_with_email():
+    import db
+
+    db.upsert_user("code:prompt-list-user", "prompt-list@example.com")
+    db.save_generation("code:prompt-list-user", "生成AIと教育の未来", "教育学", "1001-3000", {"title": "t"})
+    db.save_history_entry("code:prompt-list-user", "task-generator", "統計レポートを作成する", {"description": "統計レポートを作成する"})
+
+    resp = client.get("/admin/prompts", params={"q": "prompt-list-user"})
+    assert resp.status_code == 200
+    body = resp.json()
+    modes = {item["mode"] for item in body["items"]}
+    assert "outline" in modes
+    assert "task-generator" in modes
+    assert all(item["subject_email"] == "prompt-list@example.com" for item in body["items"])
+
+
+def test_admin_prompts_list_filters_by_mode():
+    import db
+
+    db.save_history_entry("code:mode-filter-user", "study-notes", "分子生物学のまとめ", {"label": "x", "content": "y"})
+
+    resp = client.get("/admin/prompts", params={"mode": "study-notes", "q": "mode-filter-user"})
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 1
+    assert all(item["mode"] == "study-notes" for item in items)
+
+
+def test_admin_prompt_detail_decrypts_outline_and_rejects_non_admin():
+    import db
+
+    generation_id = db.save_generation(
+        "code:detail-test-user", "量子コンピュータ入門", "物理学", "1-100", {"title": "量子入門", "sections": []}
+    )
+
+    non_admin = client.get(f"/admin/prompts/generations/{generation_id}", headers={"X-Dev-User-Id": "not-an-admin-user"})
+    assert non_admin.status_code == 403
+
+    resp = client.get(f"/admin/prompts/generations/{generation_id}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["topic"] == "量子コンピュータ入門"
+    assert body["outline"]["title"] == "量子入門"
+
+
+def test_admin_prompt_detail_decrypts_history_entry_payload():
+    import db
+
+    entry = db.save_history_entry(
+        "code:detail-test-user-2", "logic-guide", "同志社大学 / 文学部",
+        {"university": "同志社大学", "faculty": "文学部", "messages": [{"role": "user", "content": "履修相談したいです"}]},
+    )
+
+    resp = client.get(f"/admin/prompts/history_entries/{entry['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["payload"]["messages"][0]["content"] == "履修相談したいです"
+
+
+def test_admin_prompt_detail_returns_404_for_missing_entry():
+    resp = client.get("/admin/prompts/generations/999999999")
+    assert resp.status_code == 404
+
+
+def test_admin_prompt_detail_rejects_invalid_source():
+    resp = client.get("/admin/prompts/not-a-real-source/1")
+    assert resp.status_code == 400
+
+
 def test_generate_blocked_with_402_when_quota_exceeded(monkeypatch):
     import db
 

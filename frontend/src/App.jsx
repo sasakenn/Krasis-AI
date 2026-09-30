@@ -3115,6 +3115,256 @@ function AdminLoginLogs() {
   )
 }
 
+const PROMPT_MODE_LABELS = {
+  outline: 'admin.modeOutline',
+  'logic-guide': 'admin.modeLogicGuide',
+  'ai-agents': 'admin.modeAiAgents',
+  'task-generator': 'admin.modeTaskGenerator',
+  'study-notes': 'admin.modeStudyNotes',
+  tasks: 'admin.modeTasks',
+}
+
+function formatPromptMode(mode, t) {
+  const key = PROMPT_MODE_LABELS[mode]
+  return key ? t(key) : mode
+}
+
+const ADMIN_PROMPTS_PAGE_SIZE = 50
+
+// 運営者向け「プロンプト分析」。まず機能別の件数・よく使われる分野・頻出キーワードを
+// 集計値だけで見せ(会話全文は読まない)、個別の中身が気になった時だけ一覧から選んで
+// /admin/prompts/{source}/{id} を都度復号して表示する(見に行かない限り復号しない)。
+function AdminPromptAnalytics() {
+  const { lang, t } = useLanguage()
+  const [analytics, setAnalytics] = useState(null)
+  const [analyticsError, setAnalyticsError] = useState(null)
+
+  const [items, setItems] = useState([])
+  const [total, setTotal] = useState(0)
+  const [offset, setOffset] = useState(0)
+  const [mode, setMode] = useState('')
+  const [q, setQ] = useState('')
+  const [qInput, setQInput] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  const [openEntry, setOpenEntry] = useState(null) // {source, id}
+  const [detail, setDetail] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState(null)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const resp = await apiFetch('/admin/prompts/analytics')
+        if (!resp.ok) throw new Error(await readErrorMessage(resp))
+        setAnalytics(await resp.json())
+      } catch (e) {
+        setAnalyticsError(e.message || t('admin.loadFailed'))
+      }
+    })()
+  }, [t])
+
+  const load = useCallback(async (nextOffset, nextMode, nextQ) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({
+        limit: String(ADMIN_PROMPTS_PAGE_SIZE),
+        offset: String(nextOffset),
+      })
+      if (nextMode) params.set('mode', nextMode)
+      if (nextQ) params.set('q', nextQ)
+      const resp = await apiFetch(`/admin/prompts?${params.toString()}`)
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const result = await resp.json()
+      setItems(result.items)
+      setTotal(result.total)
+      setOffset(nextOffset)
+    } catch (e) {
+      setError(e.message || t('admin.loadFailed'))
+    } finally {
+      setLoading(false)
+    }
+  }, [t])
+
+  useEffect(() => {
+    load(0, mode, q)
+  }, [load, mode, q])
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault()
+    setQ(qInput.trim())
+  }
+
+  const toggleDetail = useCallback(async (source, id) => {
+    if (openEntry && openEntry.source === source && openEntry.id === id) {
+      setOpenEntry(null)
+      setDetail(null)
+      return
+    }
+    setOpenEntry({ source, id })
+    setDetail(null)
+    setDetailError(null)
+    setDetailLoading(true)
+    try {
+      const resp = await apiFetch(`/admin/prompts/${source}/${id}`)
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      setDetail(await resp.json())
+    } catch (e) {
+      setDetailError(e.message || t('admin.detailLoadFailed'))
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [openEntry, t])
+
+  const canPrev = offset > 0
+  const canNext = offset + items.length < total
+
+  return (
+    <>
+      <section className="section-card admin-prompt-analytics">
+        {analyticsError && <div className="error admin-error">{analyticsError}</div>}
+        {analytics && (
+          <>
+            <h3>{t('admin.promptsByFeature')}</h3>
+            <ul className="prompt-mode-counts">
+              {Object.entries(analytics.counts_by_mode).map(([m, c]) => (
+                <li key={m}>
+                  <span className="prompt-mode-name">{formatPromptMode(m, t)}</span>
+                  <span className="prompt-mode-count">{c.total.toLocaleString(localeFor(lang))}</span>
+                  <span className="prompt-mode-sub">
+                    {t('admin.totalGenerationsSub', { d7: c.last_7d, d30: c.last_30d })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+
+            <div className="prompt-analytics-grid">
+              <div>
+                <h4>{t('admin.promptsTopFields')}</h4>
+                {analytics.top_fields.length === 0 ? (
+                  <p className="security-panel-hint">{t('admin.noRecords')}</p>
+                ) : (
+                  <ul className="prompt-tag-list">
+                    {analytics.top_fields.map((f) => (
+                      <li key={f.field}><span>{f.field || '—'}</span><span>{f.n}</span></li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>
+                <h4>{t('admin.promptsTopKeywords')}</h4>
+                {analytics.top_keywords.length === 0 ? (
+                  <p className="security-panel-hint">{t('admin.noRecords')}</p>
+                ) : (
+                  <div className="prompt-keyword-cloud">
+                    {analytics.top_keywords.map((k) => (
+                      <span key={k.keyword} className="prompt-keyword-chip">{k.keyword} ({k.count})</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
+      </section>
+
+      <section className="section-card admin-login-logs">
+        <div className="admin-login-logs-header">
+          <h3>{t('admin.promptsList')}</h3>
+          <span className="admin-login-logs-total">{t('admin.countSuffix', { count: total.toLocaleString(localeFor(lang)) })}</span>
+        </div>
+
+        <div className="admin-login-logs-filters">
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="">{t('admin.promptsFilterAllModes')}</option>
+            {Object.keys(PROMPT_MODE_LABELS).map((m) => (
+              <option key={m} value={m}>{formatPromptMode(m, t)}</option>
+            ))}
+          </select>
+          <form onSubmit={handleSearchSubmit} className="admin-login-logs-search">
+            <input
+              type="text"
+              placeholder={t('admin.promptsSearchPlaceholder')}
+              value={qInput}
+              onChange={(e) => setQInput(e.target.value)}
+            />
+            <button type="submit">{t('admin.search')}</button>
+          </form>
+        </div>
+
+        {error && <div className="error admin-error">{error}</div>}
+
+        <div className="admin-login-logs-table-wrap">
+          <table className="admin-login-logs-table">
+            <thead>
+              <tr>
+                <th>{t('admin.colDate')}</th>
+                <th>{t('admin.colFeature')}</th>
+                <th>{t('admin.colSubject')}</th>
+                <th>{t('admin.colEmail')}</th>
+                <th>{t('admin.colPrompt')}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((p) => {
+                const isOpen = openEntry && openEntry.source === p.source && openEntry.id === p.id
+                return (
+                  <React.Fragment key={`${p.source}-${p.id}`}>
+                    <tr>
+                      <td className="admin-login-logs-date">
+                        {new Date(p.created_at).toLocaleString(localeFor(lang), {
+                          year: 'numeric', month: 'numeric', day: 'numeric',
+                          hour: '2-digit', minute: '2-digit', second: '2-digit',
+                        })}
+                      </td>
+                      <td><span className="login-badge login-badge-neutral">{formatPromptMode(p.mode, t)}</span></td>
+                      <td className="admin-login-logs-subject">{p.user_id}</td>
+                      <td className="admin-login-logs-email">{p.subject_email || '—'}</td>
+                      <td className="admin-login-logs-subject">{p.summary || '—'}{p.extra ? ` (${p.extra})` : ''}</td>
+                      <td>
+                        <button type="button" className="admin-events-see-all" onClick={() => toggleDetail(p.source, p.id)}>
+                          {isOpen ? t('admin.hideDetail') : t('admin.viewDetail')}
+                        </button>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr>
+                        <td colSpan={6} className="prompt-detail-row">
+                          {detailLoading && <p className="security-panel-hint">{t('admin.loading')}</p>}
+                          {detailError && <div className="error admin-error">{detailError}</div>}
+                          {detail && <pre className="prompt-detail-json">{JSON.stringify(detail, null, 2)}</pre>}
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                )
+              })}
+              {!loading && items.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="admin-login-logs-empty">{t('admin.noRecords')}</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="admin-login-logs-pager">
+          <button type="button" disabled={!canPrev || loading} onClick={() => load(Math.max(0, offset - ADMIN_PROMPTS_PAGE_SIZE), mode, q)}>
+            {t('admin.prevPage')}
+          </button>
+          <span>{total === 0 ? t('admin.countSuffix', { count: 0 }) : t('admin.pageRange', { from: offset + 1, to: offset + items.length, total })}</span>
+          <button type="button" disabled={!canNext || loading} onClick={() => load(offset + ADMIN_PROMPTS_PAGE_SIZE, mode, q)}>
+            {t('admin.nextPage')}
+          </button>
+        </div>
+      </section>
+    </>
+  )
+}
+
 // 運営者向け管理ダッシュボード(/admin)。app.py側の/admin/overviewが
 // ADMIN_EMAILS/ADMIN_USER_IDSに該当しないユーザーには403を返すので、
 // その場合はここでエラーメッセージだけを表示する。
@@ -3179,6 +3429,13 @@ function AdminDashboard({ onLogout, onBack }) {
           onClick={() => setTab('logins')}
         >
           {t('admin.tabLogins')}
+        </button>
+        <button
+          type="button"
+          className={tab === 'prompts' ? 'active' : ''}
+          onClick={() => setTab('prompts')}
+        >
+          {t('admin.tabPrompts')}
         </button>
       </div>
 
@@ -3254,6 +3511,7 @@ function AdminDashboard({ onLogout, onBack }) {
         )}
 
         {tab === 'logins' && <AdminLoginLogs />}
+        {tab === 'prompts' && <AdminPromptAnalytics />}
       </div>
     </div>
   )

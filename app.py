@@ -78,11 +78,14 @@ from db import (
     list_generations,
     list_history_entries,
     list_login_events,
+    list_prompt_entries,
     list_security_events,
     list_sessions,
     list_tasks,
     mark_ai_agents_subscription_sent,
     mark_task_reminded,
+    get_prompt_analytics,
+    get_prompt_entry_detail,
     record_activity_ping,
     record_security_event,
     save_generation,
@@ -1987,6 +1990,54 @@ def admin_logins(
     offset = max(0, offset)
     items, total = list_login_events(limit=limit, offset=offset, event_type=event_type, q=q)
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+ADMIN_PROMPT_LOG_PAGE_SIZE_MAX = 200
+
+
+@app.get("/admin/prompts/analytics")
+def admin_prompts_analytics(_admin_user_id: str = Depends(require_admin)):
+    """運営者向け「プロンプト分析」の集計(機能別の利用件数・よく使われる分野・
+    頻出キーワード)。個々の会話内容は読まず、平文の要約列だけから集計する。
+    """
+    return get_prompt_analytics()
+
+
+@app.get("/admin/prompts")
+def admin_prompts(
+    limit: int = 50,
+    offset: int = 0,
+    mode: Optional[str] = None,
+    q: Optional[str] = None,
+    _admin_user_id: str = Depends(require_admin),
+):
+    """運営者向け「プロンプト分析」の個別一覧。論文アウトライン生成(outline)・
+    授業案内チャット(logic-guide)・AIエージェント(ai-agents)・課題成果物生成
+    (task-generator)・レポート要点整理(study-notes)・タスク見積もり(tasks)を
+    横断して、日時降順でページングする。
+
+    一覧はプロンプトの要約(topic/title)だけで、会話全文や生成結果は含まない
+    (見るには /admin/prompts/{source}/{id} で個別に取得する)。
+    """
+    limit = max(1, min(limit, ADMIN_PROMPT_LOG_PAGE_SIZE_MAX))
+    offset = max(0, offset)
+    items, total = list_prompt_entries(limit=limit, offset=offset, mode=mode, q=q)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/admin/prompts/{source}/{entry_id}")
+def admin_prompt_detail(source: str, entry_id: int, _admin_user_id: str = Depends(require_admin)):
+    """運営者が一覧から選んだ1件だけを復号して返す詳細ビュー(会話全文・生成結果を含む)。
+
+    sourceは'generations'(論文アウトライン)または'history_entries'
+    (それ以外の全モード)のいずれか。
+    """
+    if source not in ("generations", "history_entries"):
+        raise HTTPException(status_code=400, detail="invalid source")
+    entry = get_prompt_entry_detail(source, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return entry
 
 
 @app.post("/activity/ping")
