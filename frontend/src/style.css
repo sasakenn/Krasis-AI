@@ -1969,6 +1969,60 @@ body {
 .security-panel-status { font-size: 13px; color: var(--text-secondary); margin: 0 0 8px; }
 .security-panel-status-on { color: var(--accent-green); }
 .security-panel-hint { font-size: 11px; color: var(--text-muted); word-break: break-all; margin: 6px 0 0; }
+
+/* 案内役マスコット「ITO」のポップアップ・使い方ガイド */
+.ito-tutorial-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  width: min(340px, 100%);
+}
+.ito-tutorial-image {
+  width: 140px;
+  height: auto;
+  border-radius: 50%;
+  background: #efe9df;
+  padding: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+}
+.ito-tutorial-text {
+  margin: 0;
+  font: 400 13.5px/1.7 var(--font-sans);
+  color: var(--text-secondary);
+}
+.ito-tutorial-button {
+  border: none;
+  border-radius: 8px;
+  background: var(--accent-blue);
+  color: #fff;
+  font: 700 13px/1.4 var(--font-sans);
+  padding: 9px 22px;
+  cursor: pointer;
+}
+.ito-tutorial-button:hover { background: var(--accent-blue-hover); }
+
+.help-guide-panel { width: min(560px, 100%); }
+.help-guide-intro {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.help-guide-intro .ito-tutorial-image { width: 84px; flex-shrink: 0; }
+.help-guide-intro .ito-tutorial-text { text-align: left; }
+.help-guide-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.help-guide-list li { border-top: 1px solid var(--border); padding-top: 14px; }
+.help-guide-list li:first-child { border-top: none; padding-top: 0; }
+.help-guide-list p { margin: 6px 0 0; font: 400 13px/1.7 var(--font-sans); color: var(--text-secondary); }
+.help-guide-tag { font: 600 12px/1.4 var(--font-mono); color: var(--accent-blue); }
+
+@media (prefers-color-scheme: dark) {
+  .ito-tutorial-image { background: #2a2a2e; }
+}
 .security-mfa-setup { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
 .security-mfa-secret {
   display: block;

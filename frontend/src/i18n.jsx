@@ -421,6 +421,48 @@ const translations = {
     studyNotesShort: { ja: 'レポート・資料を貼り付けるか添付すると、暗記すべき要点と全体の流れを整理します', en: 'Paste or attach a report/material to get the key points and overall flow organized', ko: '리포트·자료를 붙여넣거나 첨부하면 외워야 할 핵심과 전체 흐름을 정리해 줍니다' },
     aiAgentsShort: { ja: 'あなたの知識レベル・立場に合わせて、経済(Economics)・金融(Finance)の状況をAIが解説します', en: 'The AI explains the state of Economics & Finance, tailored to your knowledge level and role', ko: '지식 수준과 입장에 맞춰 AI가 경제(Economics)·금융(Finance) 상황을 설명해 드립니다' },
   },
+
+  // 案内役のマスコット「ITO」のセリフ。各機能に初めて入った時のポップアップと、
+  // まとめて読める使い方ガイド(HelpGuideModal)の両方で同じ文言を使う。
+  tutorial: {
+    gotIt: { ja: 'わかった!', en: 'Got it!', ko: '알겠어요!' },
+    helpGuide: { ja: '使い方ガイド', en: 'How to use', ko: '사용 가이드' },
+    helpGuideIntro: {
+      ja: 'やあ、ぼくはITO。糸をたどって、あちこちの情報をつなぐのが得意なんだ。ここでは各機能の使い方をまとめて紹介するよ。',
+      en: "Hi, I'm ITO! I love following threads and connecting bits of information together. Here's a quick guide to every feature.",
+      ko: '안녕, 나는 ITO! 실을 따라가며 여기저기 정보를 연결하는 걸 좋아해. 여기서 각 기능의 사용법을 한눈에 소개할게.',
+    },
+    outline: {
+      ja: 'やあ、ぼくはITO! ここでは書きたいテーマと参考資料を教えてくれれば、ぼくが糸をたどるように関連文献を探して、論文の骨組み(アウトライン)を組み立てるよ。まずは下のボックスから始めてみて!',
+      en: "Hi, I'm ITO! Tell me your topic and any references, and I'll follow the threads to find related literature and build a paper outline for you. Try typing a topic to get started!",
+      ko: '안녕, 나는 ITO! 주제와 참고자료를 알려주면 실을 따라가듯 관련 문헌을 찾아서 논문의 뼈대(개요)를 만들어 줄게. 먼저 궁금한 주제를 입력해 봐!',
+    },
+    logicGuide: {
+      ja: 'ここはITOおすすめの相談窓口。大学・学部・学科を選ぶだけで、授業の内容や履修のことをなんでも聞けるよ。糸電話みたいに、気軽に話しかけてみて。',
+      en: "This is ITO's favorite consultation spot. Just pick a university, faculty, and department, then ask anything about courses or enrollment — like talking through a string telephone!",
+      ko: '여기는 ITO가 추천하는 상담 창구야. 대학·학부·학과만 고르면 수업 내용이나 수강 신청에 대해 뭐든 물어볼 수 있어. 실전화처럼 편하게 말을 걸어 봐.',
+    },
+    taskGenerator: {
+      ja: '課題の内容を教えてくれれば、ぼくが糸を織るように文章やExcelの表を組み立てて、そのまま提出できる形にするよ。細かい指定も遠慮なくどうぞ。',
+      en: "Tell me about your assignment, and I'll weave the threads together into a document or Excel sheet you can submit as-is. Feel free to add specific details.",
+      ko: '과제 내용을 알려주면 실을 짜듯 문서나 엑셀 표를 만들어서 바로 제출할 수 있는 형태로 완성해 줄게. 세세한 요청도 편하게 해줘.',
+    },
+    tasks: {
+      ja: 'タスクの内容を送ってくれれば、ぼくがだいたいの所要時間を見積もって、ちょうどいいタイミングでメールでそっと教えてあげるよ。締切もあれば一緒に教えてね。',
+      en: "Send me a task and I'll estimate how long it will take, then gently remind you by email at just the right time. Let me know the deadline too, if there is one.",
+      ko: '작업 내용을 보내주면 대략적인 소요 시간을 추정해서 딱 좋은 타이밍에 이메일로 살짝 알려줄게. 마감일이 있다면 함께 알려줘.',
+    },
+    studyNotes: {
+      ja: 'レポートや資料を貼り付けるか添付してくれれば、ぼくが糸をほぐすように全体の流れを整理して、暗記すべき要点をまとめるよ。テスト前にも頼ってね。',
+      en: "Paste or attach a report or material, and I'll untangle the threads to organize the overall flow and summarize the key points to remember — great before a test too.",
+      ko: '리포트나 자료를 붙여넣거나 첨부하면 실을 풀듯 전체 흐름을 정리하고 외워야 할 핵심을 요약해 줄게. 시험 전에도 믿고 맡겨 봐.',
+    },
+    aiAgents: {
+      ja: 'ぼくが知識レベルや立場に合わせて、経済(Economics)・金融(Finance)の話を糸口からわかりやすく解説するよ。難しい専門用語も一緒にほぐしていこう。',
+      en: "I'll explain Economics & Finance topics from the very first thread, tailored to your knowledge level and role. Let's untangle the tricky terms together.",
+      ko: '지식 수준과 입장에 맞춰 경제(Economics)·금융(Finance) 이야기를 실마리부터 쉽게 풀어 줄게. 어려운 전문 용어도 함께 풀어 보자.',
+    },
+  },
 }
 
 const LanguageContext = createContext({ lang: DEFAULT_LANGUAGE, setLang: () => {}, t: (key) => key })

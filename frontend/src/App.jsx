@@ -3,6 +3,7 @@ import {
   BookOpenText,
   Download,
   FileSpreadsheet,
+  HelpCircle,
   House,
   LockKeyhole,
   LockKeyholeOpen,
@@ -17,6 +18,7 @@ import {
   X,
 } from 'lucide-react'
 import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
+import itoMascot from './assets/ito-mascot.png'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
 // アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
@@ -2205,6 +2207,98 @@ const AI_AGENT_DEFS = [
 
 const ALL_MODE_DEFS = [...MODE_DEFS, ...AI_AGENT_DEFS]
 
+// modeのidごとに、i18n.jsxのtutorial.*キー名を引くための対応表。
+// ALL_MODE_DEFSのidと1対1(homeは案内対象の「機能」ではないので含めない)。
+const TUTORIAL_KEY_BY_MODE = {
+  outline: 'tutorial.outline',
+  'logic-guide': 'tutorial.logicGuide',
+  'task-generator': 'tutorial.taskGenerator',
+  tasks: 'tutorial.tasks',
+  'study-notes': 'tutorial.studyNotes',
+  'ai-agents': 'tutorial.aiAgents',
+}
+
+const ITO_TUTORIAL_SEEN_KEY_PREFIX = 'ito-tutorial-seen-'
+
+// 各機能に初めて入った時だけ、案内役のITOが一言説明してくれるポップアップ。
+// localStorageに機能ごとの既読フラグを立てるので、同じ機能では二度目以降は出ない。
+function ItoOnboardingPopup({ modeId }) {
+  const { t } = useLanguage()
+  const tutorialKey = TUTORIAL_KEY_BY_MODE[modeId]
+  const storageKey = ITO_TUTORIAL_SEEN_KEY_PREFIX + modeId
+  const [dismissed, setDismissed] = useState(true)
+
+  useEffect(() => {
+    if (!tutorialKey) {
+      setDismissed(true)
+      return
+    }
+    let seen = false
+    try {
+      seen = localStorage.getItem(storageKey) === '1'
+    } catch {
+      // localStorageが使えない環境では、毎回表示させるより出さない方を選ぶ
+      seen = true
+    }
+    setDismissed(seen)
+  }, [tutorialKey, storageKey])
+
+  if (!tutorialKey || dismissed) return null
+
+  const handleDismiss = () => {
+    setDismissed(true)
+    try {
+      localStorage.setItem(storageKey, '1')
+    } catch {
+      // 保存できなくても、このセッション内で閉じたことにはする
+    }
+  }
+
+  return (
+    <div className="security-panel-overlay ito-tutorial-overlay" onClick={handleDismiss}>
+      <div className="security-panel ito-tutorial-panel" onClick={(e) => e.stopPropagation()}>
+        <img src={itoMascot} alt="ITO" className="ito-tutorial-image" />
+        <p className="ito-tutorial-text">{t(tutorialKey)}</p>
+        <button type="button" className="ito-tutorial-button" onClick={handleDismiss}>
+          {t('tutorial.gotIt')}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// サイドバーの「使い方ガイド」から開ける、全機能をまとめて読めるヘルプページ(モーダル)。
+function HelpGuideModal({ onClose }) {
+  const { t } = useLanguage()
+
+  return (
+    <div className="security-panel-overlay" onClick={onClose}>
+      <div className="security-panel help-guide-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="security-panel-header">
+          <h3><HelpCircle aria-hidden="true" /> {t('tutorial.helpGuide')}</h3>
+          <button type="button" className="security-panel-close" onClick={onClose} aria-label={t('security.close')}>
+            <X aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="help-guide-intro">
+          <img src={itoMascot} alt="ITO" className="ito-tutorial-image" />
+          <p className="ito-tutorial-text">{t('tutorial.helpGuideIntro')}</p>
+        </div>
+
+        <ul className="help-guide-list">
+          {ALL_MODE_DEFS.map((m) => (
+            <li key={m.id}>
+              <span className="help-guide-tag">{m.tag}</span>
+              <p>{t(TUTORIAL_KEY_BY_MODE[m.id])}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  )
+}
+
 function formatActivityMinutes(minutes, t) {
   if (minutes < 60) return t('common.minutesOnly', { minutes: Math.round(minutes) })
   const hours = Math.floor(minutes / 60)
@@ -3620,6 +3714,7 @@ export default function App() {
   }
 
   const [showSecurityPanel, setShowSecurityPanel] = useState(false)
+  const [showHelpGuide, setShowHelpGuide] = useState(false)
 
   // 利用量(トークン)表示。ログイン後・生成成功後に更新する。
   const [usage, setUsage] = useState(null)
@@ -4360,6 +4455,9 @@ export default function App() {
                 <LayoutDashboard aria-hidden="true" /> {t('sidebar.adminDashboard')}
               </button>
             )}
+            <button type="button" className="security-settings-button" onClick={() => setShowHelpGuide(true)}>
+              <HelpCircle aria-hidden="true" /> {t('tutorial.helpGuide')}
+            </button>
             <button type="button" className="security-settings-button" aria-label={`🔒 ${t('sidebar.securitySettings')}`} onClick={() => setShowSecurityPanel(true)}>
               <ShieldCheck aria-hidden="true" /> {t('sidebar.securitySettings')}
             </button>
@@ -4377,6 +4475,9 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {showHelpGuide && <HelpGuideModal onClose={() => setShowHelpGuide(false)} />}
+        {!showHelpGuide && !showSecurityPanel && <ItoOnboardingPopup modeId={channel} />}
 
         <div className="main">
           {channel === 'home' ? (
