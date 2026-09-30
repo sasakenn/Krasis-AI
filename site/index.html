@@ -1,0 +1,940 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Krasis</title>
+<meta name="description" content="Krasis(クラシス)は、大学生のための学習ツールをつくっています。最初のプロダクトTHYNORAは、テーマを入れると章立てと論点、読むべき論文の候補を返します。">
+<meta property="og:title" content="Krasis">
+<meta property="og:description" content="白紙の前で止まる時間を、ゼロにする。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M5 5.5 L18.5 12 M5 18.5 L18.5 12' stroke='%2314161A' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='5.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='5' cy='18.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='18.5' cy='12' r='3.3' fill='%23e6ab84'/%3E%3C/svg%3E">
+<style>
+  :root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+<style>
+  /* THYNORA本体(frontend/src/style.css)のトークン名・値をそのまま移植 */
+  :root {
+    --bg-app: #F6F4EF;
+    --bg-tabbar: #EFECE5;
+    --bg-sidebar: #F1EEE7;
+    --bg-panel: #ffffff;
+    --bg-panel-hover: #F1EFE9;
+    --ink-rgb: 20, 22, 26;
+    --border: rgba(var(--ink-rgb), 0.09);
+    --border-light: rgba(var(--ink-rgb), 0.14);
+    --text-primary: #14161A;
+    --text-secondary: #6B6F76;
+    --text-muted: #8A8578;
+    --text-faint: #B0AA9B;
+    --accent-blue: #1F3BAE;
+    --accent-blue-hover: #182F8F;
+    --accent-green: #0E7C68;
+    --glow-soft: rgba(31, 59, 174, 0.14);
+    --chip-bg: #14161A;
+    --chip-text: #ffffff;
+    --on-accent: #ffffff;
+
+    /* 起動演出の世界(テーマ非依存) */
+    --void: #08090b;
+    --void-2: #0f1114;
+    --void-3: #16191d;
+    --void-ink: #EDEBE6;
+    --void-ink-2: #8f9296;
+    --void-line: rgba(255, 255, 255, 0.09);
+    --gold: #e6ab84;
+    --signal: #3A94BC;
+
+    --text-body: #3F434A;
+    --text-head: #14161A;
+    --rule: rgba(20, 22, 26, 0.2);
+    --rule-soft: rgba(20, 22, 26, 0.12);
+    --muted-ink: #6E6A60;
+
+    --font-sans: 'Zen Kaku Gothic New', 'Noto Sans JP', system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+    --font-serif: 'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+    --font-quote: 'Instrument Serif', Georgia, 'Times New Roman', serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg-app: #121314;
+      --bg-tabbar: #191A1B;
+      --bg-sidebar: #191A1B;
+      --bg-panel: #202122;
+      --bg-panel-hover: #323334;
+      --ink-rgb: 255, 255, 255;
+      --border: #2A2B2C;
+      --border-light: #333536;
+      --text-primary: #D4D4D4;
+      --text-secondary: #9C9C9C;
+      --text-muted: #858889;
+      --text-faint: #707070;
+      --accent-blue: #3A94BC;
+      --accent-blue-hover: #6CADDF;
+      --accent-green: #86CF86;
+      --glow-soft: rgba(58, 148, 188, 0.18);
+      --chip-bg: #307E9F;
+      --chip-text: #ffffff;
+      --on-accent: #ffffff;
+      --text-body: #B5B5B5;
+      --text-head: #E4E4E4;
+      --rule: rgba(255, 255, 255, 0.16);
+      --rule-soft: rgba(255, 255, 255, 0.08);
+      --muted-ink: #8E9093;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-app: #121314;
+    --bg-tabbar: #191A1B;
+    --bg-sidebar: #191A1B;
+    --bg-panel: #202122;
+    --bg-panel-hover: #323334;
+    --ink-rgb: 255, 255, 255;
+    --border: #2A2B2C;
+    --border-light: #333536;
+    --text-primary: #D4D4D4;
+    --text-secondary: #9C9C9C;
+    --text-muted: #858889;
+    --text-faint: #707070;
+    --accent-blue: #3A94BC;
+    --accent-blue-hover: #6CADDF;
+    --accent-green: #86CF86;
+    --glow-soft: rgba(58, 148, 188, 0.18);
+    --chip-bg: #307E9F;
+    --chip-text: #ffffff;
+    --on-accent: #ffffff;
+    --text-body: #B5B5B5;
+    --text-head: #E4E4E4;
+    --rule: rgba(255, 255, 255, 0.16);
+    --rule-soft: rgba(255, 255, 255, 0.08);
+    --muted-ink: #8E9093;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg-app);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "palt";
+  }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; border-radius: 3px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 24px; }
+  @media (max-width: 480px) { .wrap { padding-inline: 16px; } }
+  .mono { font-family: var(--font-mono); }
+
+  /* ================= 起動演出: ニューラルネットワーク投影 ================= */
+  #nn-splash {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--void);
+    display: grid; place-items: center;
+    transition: opacity .5s cubic-bezier(.4,0,.2,1), visibility .5s;
+    cursor: pointer;
+  }
+  #nn-splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
+  #nn-splash canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .nn-logo { position: relative; isolation: isolate; text-align: center; pointer-events: none; padding: 48px 72px; }
+  .nn-logo::before { content: ""; position: absolute; inset: -20px; z-index: -1; background: radial-gradient(closest-side, rgba(8,9,11,.96) 55%, rgba(8,9,11,0)); opacity: 0; transition: opacity .6s; }
+  #nn-splash.logo .nn-logo::before { opacity: 1; }
+  .nn-logo b {
+    display: block;
+    font: 500 clamp(26px, 5vw, 44px)/1 var(--font-mono);
+    letter-spacing: .5em; margin-right: -.5em;
+    color: #fff; text-shadow: 0 0 24px rgba(230,171,132,.35);
+    opacity: 0; transition: opacity 1s cubic-bezier(.3,0,.2,1), letter-spacing 1s cubic-bezier(.3,0,.2,1), margin 1s cubic-bezier(.3,0,.2,1);
+  }
+  .nn-mk { width: 34px; height: 34px; color: #fff; display: block; margin: 0 auto 18px; opacity: 0; transition: opacity .8s; }
+  #nn-splash.logo .nn-mk { opacity: 1; }
+  .nn-logo span {
+    display: block; margin-top: 1em;
+    font: 400 clamp(11px, 1.3vw, 13px)/1 var(--font-mono);
+    letter-spacing: .32em; color: var(--gold);
+    opacity: 0; transition: opacity 1s .2s;
+  }
+  #nn-splash.logo .nn-logo b { opacity: 1; letter-spacing: .28em; margin-right: -.28em; }
+  #nn-splash.logo .nn-logo span { opacity: 1; }
+  .nn-skip {
+    position: absolute; right: 20px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    font: 400 11px/1 var(--font-mono); color: var(--void-ink-2); letter-spacing: .08em;
+  }
+  .nn-log {
+    position: absolute; left: 20px; bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    font: 400 11px/1.6 var(--font-mono); color: var(--void-ink-2); white-space: pre;
+  }
+
+  /* ================= topbar(アプリの.topbar) ================= */
+  .topbar {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+    background: var(--bg-tabbar);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .wrap { display: flex; align-items: center; gap: 14px; height: 46px; }
+  .brand { display: inline-flex; align-items: center; gap: 7px; font: 500 11px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
+  .brand .mk { width: 14px; height: 14px; color: var(--accent-blue); }
+  .brand b { color: var(--text-primary); font-weight: 500; }
+  .sep { font: 400 11px/1 var(--font-mono); color: var(--text-faint); }
+  .crumb { font: 500 12.5px/1 var(--font-sans); color: var(--text-primary); white-space: nowrap; }
+  .topnav { display: flex; gap: 2px; margin-left: 10px; }
+  .topnav a { font: 400 12px/1 var(--font-sans); color: var(--text-secondary); text-decoration: none; padding: 7px 9px; border-radius: 6px; }
+  .topnav a:hover { background: var(--bg-panel-hover); color: var(--text-primary); }
+  .spacer { flex: 1; }
+  .search {
+    display: flex; align-items: center; gap: 10px;
+    border: 1px solid var(--border-light); background: var(--bg-panel);
+    border-radius: 8px; padding: 6px 8px 6px 11px;
+    font: 400 11.5px/1 var(--font-sans); color: var(--text-secondary);
+    cursor: pointer; white-space: nowrap;
+  }
+  .search:hover { background: var(--bg-panel-hover); }
+  .kbd { font: 500 10px/1 var(--font-mono); color: var(--text-faint); border: 1px solid var(--border-light); border-radius: 4px; padding: 3px 5px; }
+  .chip { font: 500 10.5px/1 var(--font-mono); color: var(--chip-text); background: var(--chip-bg); border-radius: 5px; padding: 6px 9px; letter-spacing: .06em; text-decoration: none; white-space: nowrap; }
+  .chip i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #5ED28A; margin-right: 6px; vertical-align: 1px; }
+  @media (max-width: 900px) { .topnav, .sep, .crumb { display: none; } }
+  @media (max-width: 420px) { .search .label { display: none; } }
+
+  /* ================= hero ================= */
+  .hero {
+    position: relative; overflow: hidden; isolation: isolate;
+    background: var(--void); color: var(--void-ink);
+    padding-block: 96px 104px;
+  }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; }
+  .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(8,9,11,.92) 0%, rgba(8,9,11,.6) 55%, rgba(8,9,11,.2) 100%); }
+  .hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 56px; align-items: center; }
+  @media (max-width: 900px) { .hero-grid { grid-template-columns: 1fr; gap: 40px; } .hero::after { background: rgba(8,9,11,.72); } }
+  .eyebrow { font: 500 11.5px/1 var(--font-mono); letter-spacing: .18em; text-transform: uppercase; color: var(--gold); margin: 0 0 22px; }
+  .hero h1 {
+    font-weight: 900; font-size: clamp(2.1rem, 4.8vw, 3.5rem);
+    line-height: 1.22; letter-spacing: -0.01em; margin: 0 0 22px;
+  }
+  .nw { display: inline-block; }
+  .hero h1 em { font-style: normal; background: linear-gradient(90deg, #ffffff 0%, var(--gold) 90%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--void-ink-2); font-size: 1rem; max-width: 34em; margin: 0; }
+  .cta-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+  .btn { display: inline-flex; align-items: center; gap: 10px; padding: 12px 20px; border-radius: 8px; font: 500 .92rem/1 var(--font-sans); text-decoration: none; border: 1px solid transparent; transition: background-color .15s, border-color .15s; }
+  .btn.white { background: var(--void-ink); color: var(--void); }
+  .btn.white:hover { background: #fff; }
+  .btn.ghost { border-color: rgba(255,255,255,.16); color: var(--void-ink); }
+  .btn.ghost:hover { border-color: rgba(255,255,255,.34); }
+  .btn.blue { background: var(--accent-blue); color: var(--on-accent); }
+  .btn.blue:hover { background: var(--accent-blue-hover); }
+  .btn .k { font: 500 10px/1 var(--font-mono); opacity: .6; }
+
+  .term {
+    background: rgba(15,17,20,.86); border: 1px solid var(--void-line); border-radius: 10px;
+    font: 400 12.5px/1.85 var(--font-mono); color: var(--void-ink-2);
+    box-shadow: 0 30px 80px rgba(0,0,0,.5); overflow: hidden; max-width: 100%;
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  }
+  .term-bar { display: flex; gap: 6px; align-items: center; padding: 9px 12px; border-bottom: 1px solid var(--void-line); font-size: 11px; }
+  .term-bar span { width: 9px; height: 9px; border-radius: 50%; background: #2b2e33; }
+  .term-bar em { font-style: normal; margin-left: 8px; }
+  .term pre { margin: 0; padding: 14px 16px 16px; white-space: pre-wrap; word-break: break-word; font: inherit; }
+  .term .p { color: var(--gold); }
+  .term .w { color: var(--void-ink); }
+  .term .ok { color: #5ED28A; }
+  .term .c { color: #5f6368; }
+  .caret { display: inline-block; width: 7px; height: 14px; background: var(--void-ink); vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* ================= sections ================= */
+  section.block { padding-block: 88px; border-top: 1px solid var(--border); }
+  section.block.alt { background: var(--bg-sidebar); }
+  .sec-head { margin-bottom: 40px; max-width: 44em; }
+  .sec-label { display: flex; gap: 12px; align-items: baseline; font: 500 12px/1 var(--font-mono); color: var(--text-muted); margin: 0 0 14px; letter-spacing: .04em; }
+  .sec-label b { color: var(--accent-blue); font-weight: 500; }
+  h2 { font-weight: 700; font-size: clamp(1.5rem, 2.8vw, 2rem); line-height: 1.4; letter-spacing: -0.005em; margin: 0 0 10px; text-wrap: balance; }
+  .sec-head p { color: var(--text-secondary); margin: 0; }
+
+  /* mission: home-panel風 */
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 860px) { .grid3 { grid-template-columns: 1fr; } }
+  .panel { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; }
+  .panel .k { font: 500 11px/1 var(--font-mono); color: var(--accent-blue); letter-spacing: .1em; text-transform: uppercase; }
+  .panel h3 { font-size: 1.02rem; margin: 12px 0 6px; }
+  .panel p { margin: 0; color: var(--text-secondary); font-size: .9rem; }
+
+  /* product */
+  .product-head { display: flex; justify-content: space-between; align-items: end; gap: 24px; flex-wrap: wrap; margin-bottom: 22px; }
+  .pname { display: flex; align-items: center; gap: 10px; font: 600 1.35rem/1 var(--font-mono); letter-spacing: .24em; margin: 0 0 10px; }
+  .pname .mk { width: 22px; height: 22px; color: var(--accent-blue); }
+  .ptag { margin: 0; color: var(--text-secondary); font-size: .95rem; max-width: 40em; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+  .meta span { font: 400 11px/1 var(--font-mono); border: 1px solid var(--border-light); border-radius: 5px; padding: 5px 8px; color: var(--text-secondary); background: var(--bg-panel); }
+  .meta span.live { color: var(--accent-green); }
+
+  /* app mock: topbar + sidebar + main */
+  .app {
+    border: 1px solid var(--border-light); border-radius: 12px; overflow: hidden;
+    background: var(--bg-app); box-shadow: 0 24px 60px rgba(var(--ink-rgb), .10);
+    font-size: 13px; max-width: 100%;
+  }
+  .app-top { display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 14px; background: var(--bg-tabbar); border-bottom: 1px solid var(--border); }
+  .app-top .dots { display: flex; gap: 6px; }
+  .app-top .dots span { width: 9px; height: 9px; border-radius: 50%; background: var(--border-light); }
+  .app-top .t { font: 500 11px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-muted); display: inline-flex; gap: 6px; align-items: center; }
+  .app-top .t .mk { width: 12px; height: 12px; color: var(--accent-blue); }
+  .app-top .plan { margin-left: auto; font: 500 10px/1 var(--font-mono); color: var(--chip-text); background: var(--chip-bg); border-radius: 4px; padding: 4px 7px; letter-spacing: .06em; }
+  .app-body { display: grid; grid-template-columns: 250px 1fr; min-height: 380px; }
+  .app-side { background: var(--bg-sidebar); border-right: 1px solid var(--border); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .mi { display: flex; align-items: center; gap: 10px; border-radius: 9px; padding: 8px 10px; }
+  .mi.active { background: var(--bg-panel); }
+  .mi .bar { width: 3px; height: 24px; border-radius: 2px; background: transparent; flex: none; }
+  .mi.active .bar { background: var(--accent-blue); }
+  .mi .b { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .mi .tg { font: 500 11.5px/1.3 var(--font-mono); color: var(--text-primary); white-space: nowrap; }
+  .mi.active .tg { color: var(--accent-blue); }
+  .mi .sh { font-size: 10px; line-height: 1.4; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mi .ky { font: 400 10px/1 var(--font-mono); color: var(--text-faint); }
+  .app-main { padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .bubble { align-self: flex-end; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px 10px 2px 10px; padding: 9px 13px; max-width: 90%; }
+  .bubble small { display: block; font: 400 10.5px/1.4 var(--font-mono); color: var(--text-muted); margin-top: 3px; }
+  .ans h4 { font-size: .95rem; margin: 0 0 10px; line-height: 1.5; }
+  .ans ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+  .ans li { display: grid; grid-template-columns: 3.4em 1fr; gap: 6px; }
+  .ans li b { font: 500 10.5px/1.9 var(--font-mono); color: var(--accent-blue); }
+  .ans li span { color: var(--text-muted); font-size: 11.5px; display: block; }
+  .refs { border-top: 1px dashed var(--border-light); padding-top: 10px; display: grid; gap: 4px; font-size: 12px; }
+  .refs .lb { font: 500 10px/1 var(--font-mono); color: var(--text-muted); letter-spacing: .08em; margin-bottom: 4px; }
+  .refs div { display: flex; gap: 10px; }
+  .refs i { font: normal 400 10.5px/1.7 var(--font-mono); color: var(--text-muted); }
+  .composer { margin-top: auto; border: 1px solid var(--border-light); border-radius: 10px; background: var(--bg-panel); padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; color: var(--text-faint); font-size: 12px; box-shadow: 0 0 0 3px var(--glow-soft); }
+  .composer .send { font: 500 10px/1 var(--font-mono); color: var(--on-accent); background: var(--accent-blue); border-radius: 5px; padding: 5px 8px; }
+  .mock-note { font: 400 10.5px/1 var(--font-mono); color: var(--text-muted); text-align: right; margin-top: 10px; }
+  @media (max-width: 760px) { .app-body { grid-template-columns: 1fr; } .app-side { display: none; } }
+
+  /* mode list(.mode-item を大きく) */
+  .subhead { font: 500 11.5px/1 var(--font-mono); color: var(--text-muted); letter-spacing: .06em; margin: 52px 0 12px; }
+  .modes { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 6px; display: grid; gap: 2px; }
+  .mode { display: grid; grid-template-columns: 3px 16em 1fr auto; gap: 18px; align-items: center; padding: 14px 16px 14px 10px; border-radius: 9px; }
+  .mode:hover { background: var(--bg-panel-hover); }
+  .mode .bar { width: 3px; height: 30px; border-radius: 2px; background: var(--border-light); }
+  .mode:hover .bar { background: var(--accent-blue); }
+  .mode .tg { font: 500 13px/1.3 var(--font-mono); color: var(--accent-blue); }
+  .mode h3 { font-size: .95rem; margin: 0 0 2px; }
+  .mode p { margin: 0; color: var(--text-secondary); font-size: .86rem; line-height: 1.6; }
+  @media (max-width: 760px) { .mode { grid-template-columns: 3px 1fr auto; } .mode > div { grid-column: 2 / -1; } }
+
+  /* plans */
+  .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 860px) { .plans { grid-template-columns: 1fr; } }
+  .plan { display: flex; flex-direction: column; gap: 8px; }
+  .plan.pick { border-color: var(--accent-blue); box-shadow: 0 0 0 3px var(--glow-soft); }
+  .plan .row { display: flex; justify-content: space-between; align-items: center; }
+  .plan .nm { font: 500 12px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-muted); }
+  .plan .badge { font: 500 10px/1 var(--font-mono); color: var(--chip-text); background: var(--chip-bg); border-radius: 4px; padding: 4px 7px; }
+  .plan .num { font: 700 1.7rem/1.1 var(--font-mono); color: var(--accent-blue); font-variant-numeric: tabular-nums; margin-top: 6px; }
+  .plan .num small { font: 400 .72rem/1 var(--font-mono); color: var(--text-muted); margin-left: 4px; }
+  .plan .price { font: 500 .9rem/1 var(--font-mono); color: var(--text-primary); }
+  .plan p { margin: 0; color: var(--text-secondary); font-size: .88rem; }
+  .fine { color: var(--text-muted); font-size: .8rem; margin: 16px 0 0; }
+
+  /* security: status list */
+  .checks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0 40px; border-top: 1px solid var(--border); }
+  @media (max-width: 760px) { .checks { grid-template-columns: 1fr; } }
+  .checks li { display: grid; grid-template-columns: 4.2em 1fr; gap: 12px; padding: 18px 2px; border-bottom: 1px solid var(--border); }
+  .checks .st { font: 500 11.5px/1.8 var(--font-mono); color: var(--accent-green); white-space: nowrap; }
+  .checks h3 { font-size: .96rem; margin: 0 0 3px; }
+  .checks p { margin: 0; color: var(--text-secondary); font-size: .88rem; }
+
+  /* news: git log */
+  .log { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; font-family: var(--font-mono); font-size: 13px; overflow: hidden; }
+  .log .hd { padding: 10px 16px; border-bottom: 1px solid var(--border); color: var(--text-muted); font-size: 11.5px; }
+  .log ul { list-style: none; margin: 0; padding: 6px 0; }
+  .log li { display: grid; grid-template-columns: 1.2em 6.6em 7.2em 1fr; gap: 12px; padding: 10px 16px; align-items: baseline; }
+  .log li:hover { background: var(--bg-panel-hover); }
+  .log .dot { color: var(--accent-blue); }
+  .log time { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+  .log .tg { font-size: 11px; color: var(--accent-blue); }
+  .log .m { font-family: var(--font-sans); color: var(--text-primary); font-size: 14px; }
+  @media (max-width: 640px) { .log li { grid-template-columns: 1.2em 1fr; } .log .tg { display: none; } .log .m { grid-column: 2; } }
+
+  /* company: key: value */
+  .kv { margin: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 0; max-width: 780px; }
+  .kv div { display: grid; grid-template-columns: 11em 1fr; gap: 12px; padding: 12px 20px; }
+  .kv div + div { border-top: 1px solid var(--border); }
+  .kv dt { font: 400 12.5px/1.7 var(--font-mono); color: var(--text-muted); }
+  .kv dt::after { content: ":"; }
+  .kv dd { margin: 0; }
+  @media (max-width: 520px) { .kv div { grid-template-columns: 1fr; gap: 2px; } }
+
+  /* closing */
+  .closing { position: relative; overflow: hidden; isolation: isolate; background: var(--void); color: var(--void-ink); padding-block: 80px; }
+  .closing .inner { display: flex; justify-content: space-between; align-items: center; gap: 28px; flex-wrap: wrap; }
+  .closing h2 { color: var(--void-ink); }
+  .closing p { color: var(--void-ink-2); margin: 0; }
+  .closing .tl { font: 400 12px/1 var(--font-mono); letter-spacing: .32em; color: var(--gold); margin: 0 0 16px; }
+  footer { background: var(--void); color: var(--void-ink-2); border-top: 1px solid var(--void-line); padding-block: 22px 30px; font: 400 11.5px/1.6 var(--font-mono); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  footer p { margin: 0; }
+
+  /* ⌘K palette */
+  .pal-back { position: fixed; inset: 0; z-index: 60; background: rgba(8,9,11,.45); display: grid; justify-items: center; align-items: start; padding: 12vh 16px 16px; }
+  .pal-back[hidden], #nn-splash[hidden] { display: none; }
+  .pal { width: min(560px, 100%); background: var(--bg-panel); border: 1px solid var(--border-light); border-radius: 12px; box-shadow: 0 30px 80px rgba(0,0,0,.35); overflow: hidden; }
+  .pal input { width: 100%; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text-primary); font: 400 14px/1 var(--font-sans); padding: 16px 18px; outline: none; }
+  .pal ul { list-style: none; margin: 0; padding: 6px; max-height: 50vh; overflow: auto; }
+  .pal li { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; }
+  .pal li .kd { font: 500 10.5px/1 var(--font-mono); color: var(--text-muted); width: 4.6em; }
+  .pal li[aria-selected="true"] { background: var(--bg-panel-hover); }
+  .pal li[aria-selected="true"] .kd { color: var(--accent-blue); }
+  .pal .ft { border-top: 1px solid var(--border); padding: 8px 14px; font: 400 10.5px/1 var(--font-mono); color: var(--text-muted); display: flex; gap: 14px; }
+
+  /* ================= 明朝体の組版(キャンバス版) ================= */
+  .hero h1 { font-family: var(--font-serif); font-weight: 800; font-size: clamp(2.4rem, 5.6vw, 4.75rem); line-height: 1.24; letter-spacing: .01em; color: var(--void-ink); margin: 0 0 26px; }
+  .hero h1 em { background: none; -webkit-background-clip: border-box; background-clip: border-box; color: var(--gold); font-style: normal; }
+  .lead { color: #A2A5A9; line-height: 2; max-width: 32em; }
+  .btn { font-family: var(--font-sans); font-weight: 700; }
+  .btn.link { color: var(--void-ink); font: 400 13px/1 var(--font-mono); padding-inline: 8px; }
+  .btn.link:hover { color: var(--gold); }
+
+  .serif { font-family: var(--font-serif); }
+  h2.serif { font-weight: 700; letter-spacing: .02em; color: var(--text-head); }
+  .side { font: 500 12px/1.6 var(--font-mono); color: var(--muted-ink); margin: 0; }
+  .side.blue { color: var(--accent-blue); }
+  .ed { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 72px; row-gap: 64px; }
+  .ed > * { min-width: 0; }
+  @media (max-width: 860px) { .ed { grid-template-columns: minmax(0, 1fr); row-gap: 18px; } .ans-big br { display: none; } }
+
+  section.q { padding-block: 128px 120px; }
+  .q .side { padding-top: 16px; }
+  .q-quote { display: grid; gap: 18px; }
+  .q-quote blockquote { margin: 0; font: italic 400 clamp(2rem, 4.4vw, 3.75rem)/1.12 var(--font-quote); letter-spacing: -.01em; color: var(--text-head); max-width: 18em; }
+  .cite { margin: 0; font: 400 12px/1.6 var(--font-mono); color: var(--muted-ink); }
+  .q-ja { margin: 0; font-size: .9rem; color: var(--text-secondary); }
+  @media (max-width: 860px) { .q .side.blue { margin-top: 40px; } }
+  .answer { border-left: 2px solid var(--text-head); padding-left: clamp(18px, 3vw, 40px); display: grid; gap: 28px; }
+  .ans-big { margin: 0; font: 700 clamp(1.4rem, 2.5vw, 2.15rem)/1.6 var(--font-serif); letter-spacing: .02em; color: var(--text-head); max-width: 24em; }
+  .ans-body { margin: 0; font-size: 1rem; line-height: 2.05; color: var(--text-body); max-width: 40em; }
+
+  .p-head { display: flex; align-items: baseline; gap: 22px; flex-wrap: wrap; margin-bottom: 44px; }
+  .p-head h2 { font-size: clamp(1.6rem, 3vw, 2.25rem); margin: 0; }
+  .prin { border-top: 1px solid var(--rule); }
+  .prin-row { display: grid; grid-template-columns: 120px minmax(0, 1.1fr) minmax(0, .9fr); gap: 40px; align-items: baseline; padding-block: 38px; border-bottom: 1px solid var(--rule); }
+  .prin-k { font: 400 clamp(1.6rem, 3vw, 2.75rem)/1 var(--font-mono); color: var(--accent-blue); }
+  .prin-h { margin: 0; font: 700 clamp(1.3rem, 2.3vw, 1.9rem)/1.55 var(--font-serif); color: var(--text-head); }
+  .prin-b { margin: 0; line-height: 2; color: var(--text-body); }
+  @media (max-width: 860px) { .prin-row { grid-template-columns: 1fr; gap: 12px; padding-block: 26px; } }
+
+  #products .product-head { align-items: flex-end; margin-bottom: 30px; }
+  .ph-l { display: grid; gap: 16px; }
+  #products .pname { font-size: clamp(1.4rem, 2.4vw, 1.9rem); margin: 0; }
+  #products .pname .mk { width: 28px; height: 28px; }
+  .ptag-serif { margin: 0; font: 700 clamp(1.15rem, 2vw, 1.65rem)/1.6 var(--font-serif); color: var(--text-head); }
+  .ans h4 { font-family: var(--font-serif); }
+  .idx-block { margin-top: 56px; }
+  .idx-block .side { padding-top: 20px; }
+  .idx { border-top: 1px solid var(--rule); }
+  .idx-row { display: grid; grid-template-columns: 210px minmax(0, 1fr) 40px; gap: 24px; align-items: baseline; padding-block: 20px; border-bottom: 1px solid var(--rule-soft); }
+  .idx-h { font: 700 1.2rem/1.5 var(--font-serif); color: var(--text-head); }
+  .idx-b { font-size: .92rem; line-height: 1.85; color: var(--text-body); }
+  .idx-k { font: 400 11px/1 var(--font-mono); color: var(--text-muted); text-align: right; }
+  @media (max-width: 720px) { .idx-row { grid-template-columns: 1fr auto; gap: 6px 12px; } .idx-b { grid-column: 1 / -1; } .idx-k { grid-column: 2; grid-row: 1; } }
+
+  .tbl-wrap { overflow-x: auto; }
+  .plans-tbl { width: 100%; min-width: 560px; border-collapse: collapse; }
+  .plans-tbl th, .plans-tbl td { text-align: left; padding: 16px 12px 16px 0; border-bottom: 1px solid var(--rule-soft); vertical-align: baseline; }
+  .plans-tbl thead th { font: 500 11px/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted-ink); border-bottom-color: var(--rule); padding-block: 12px; }
+  .plans-tbl tbody th { font: 600 15px/1 var(--font-mono); color: var(--text-head); }
+  .plans-tbl td { color: var(--text-body); font-size: .92rem; }
+  .plans-tbl td.n { font: 400 1.35rem/1 var(--font-mono); color: var(--accent-blue); font-variant-numeric: tabular-nums; }
+  .plans-tbl .r { text-align: right; font-family: var(--font-mono); color: var(--text-head); padding-right: 0; }
+  .plans-tbl .r.muted { color: var(--muted-ink); }
+  .fine { color: var(--muted-ink); }
+
+  .side-head { display: grid; gap: 10px; align-content: start; }
+  .side-head h2 { font-size: 1.85rem; margin: 0; }
+  .rows { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .rows.news li { display: grid; grid-template-columns: 120px 100px minmax(0, 1fr); gap: 18px; align-items: baseline; padding-block: 17px; border-bottom: 1px solid var(--rule-soft); }
+  .rows.news time { font: 400 13px/1.6 var(--font-mono); color: var(--muted-ink); font-variant-numeric: tabular-nums; }
+  .rows.news .tag { font: 400 11px/1.6 var(--font-mono); color: var(--accent-blue); }
+  @media (max-width: 640px) { .rows.news li { grid-template-columns: 1fr; gap: 2px; } .rows.news .tag { display: none; } }
+  .kv2 { max-width: 820px; }
+  .kv2 div { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 18px; padding-block: 15px; border-bottom: 1px solid var(--rule-soft); }
+  .kv2 dt { font: 400 12.5px/1.8 var(--font-mono); color: var(--muted-ink); }
+  .kv2 dd { margin: 0; color: var(--text-head); }
+  .lnk { color: var(--accent-blue); }
+  @media (max-width: 520px) { .kv2 div { grid-template-columns: 1fr; gap: 0; } }
+
+  .closing { padding-block: clamp(72px, 9vw, 112px); }
+  .closing .inner { align-items: flex-end; }
+  .z1 { display: grid; gap: 20px; }
+  .closing .zero { margin: 0; font: 400 clamp(4.5rem, 10vw, 7.5rem)/1 var(--font-mono); letter-spacing: -.02em; color: var(--void-ink); }
+  .zero span { color: var(--gold); margin-inline: .22em; }
+  .closing blockquote { margin: 0; font: italic 400 clamp(1.3rem, 2.4vw, 1.9rem)/1.3 var(--font-quote); color: #C9C7C2; max-width: 26em; }
+  .closing .cite { color: var(--void-ink-2); }
+  .z-ja { margin: 6px 0 0 !important; font: 700 clamp(1.1rem, 2vw, 1.5rem)/1.5 var(--font-serif); color: var(--void-ink) !important; }
+
+  @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <symbol id="k-mark" viewBox="0 0 24 24">
+    <path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+    <circle cx="5" cy="5.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <circle cx="5" cy="18.5" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6"/>
+    <circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/>
+  </symbol>
+</defs></svg>
+<!-- ===== 起動演出 ===== -->
+<div id="nn-splash" aria-hidden="true">
+  <canvas id="nn-canvas"></canvas>
+  <div class="nn-logo"><svg class="mk nn-mk" viewBox="0 0 24 24" aria-hidden="true"><use href="#k-mark"/></svg><b>KRASIS</b><span>THINK BEYOND.</span></div>
+  <div class="nn-log" id="nn-log"></div>
+  <div class="nn-skip">click to skip</div>
+</div>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Krasis トップへ">
+      <svg class="mk" viewBox="0 0 24 24" aria-hidden="true"><use href="#k-mark"/></svg>
+      <b>KRASIS</b>
+    </a>
+    <span class="sep">/</span>
+    <span class="crumb" id="crumb">home</span>
+    <nav class="topnav" aria-label="サイト内">
+      <a href="#question">question</a>
+      <a href="#principles">principles</a>
+      <a href="#products">products</a>
+      <a href="#news">news</a>
+      <a href="#company">company</a>
+    </nav>
+    <span class="spacer"></span>
+    <button class="search" id="pal-open" type="button" aria-haspopup="dialog"><span class="label">ページ内を検索</span><span class="kbd">⌘K</span></button>
+    <a class="chip" href="https://app.krasis.xyz/" target="_blank" rel="noopener"><i aria-hidden="true"></i>THYNORA</a>
+  </div>
+</header>
+
+<section class="hero" id="top">
+  <canvas id="hero-canvas" aria-hidden="true"></canvas>
+  <div class="wrap hero-grid">
+    <div>
+      <p class="eyebrow">Krasis · AI for learning</p>
+      <h1><span class="nw">白紙の前で</span><br><span class="nw">止まる時間を、</span><br><span class="nw"><em>ゼロ</em>にする。</span></h1>
+      <p class="lead">Krasis(クラシス)は、大学生のための学習ツールをつくっています。テーマを入れれば、章立てと論点と、読むべき論文の候補が出てくる。そこから先を考えるのは、あなたです。</p>
+      <div class="cta-row">
+        <a class="btn white" href="https://app.krasis.xyz/" target="_blank" rel="noopener">THYNORAを無料で使う →</a>
+        <a class="btn link" href="#question">read our answer ↓</a>
+      </div>
+    </div>
+    <div class="term" role="img" aria-label="THYNORAの稼働状況">
+      <div class="term-bar"><span></span><span></span><span></span><em>~/krasis</em></div>
+<pre><span class="p">$</span> <span class="w">thynora --status</span>
+web      <span class="ok">● live</span>   <span class="w">app.krasis.xyz</span>
+modes    <span class="w">5</span>  outline · guide · notes …
+search   <span class="w">OpenAlex</span> + 和訳
+auth     <span class="w">MFA</span> · 4 login methods
+storage  <span class="w">encrypted</span> at rest
+apps     <span class="c">○ building</span>  mac · win · ios
+<span class="p">$</span> <span class="caret"></span></pre>
+    </div>
+  </div>
+</section>
+
+<section class="block q" id="question">
+  <div class="wrap ed">
+    <p class="side">// the question</p>
+    <div class="q-quote">
+      <blockquote lang="en">“What important truth do very few people agree with you on?”</blockquote>
+      <p class="cite">— Peter Thiel, <i>Zero to One</i> (2014)</p>
+      <p class="q-ja">賛成する人がほとんどいない、大切な真実はなにか。</p>
+    </div>
+    <p class="side blue">// our answer</p>
+    <div class="answer">
+      <p class="ans-big">レポートでいちばん時間を奪っているのは、<br>書くことではない。<br>何から書けばいいか分からない、<br>あの白紙の時間。</p>
+      <p class="ans-body">多くの人は、AIの仕事は「文章を書くこと」だと思っている。私たちはそう考えていない。書き始めるまでの迷いさえ消えれば、学生は自分で書ける。だからKrasisは、答えではなく最初の足場をつくる。</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="principles">
+  <div class="wrap">
+    <div class="p-head"><p class="side">// principles</p><h2 class="serif">私たちが決めていること</h2></div>
+    <div class="prin">
+      <div class="prin-row"><span class="prin-k">0→1</span><p class="prin-h">代わりに書かない。<br>書き始められるようにする。</p><p class="prin-b">AIが仕上げた文章は、学生の力にならない。THYNORAが出すのは、考える材料と下書きまで。最後に判断して書くのは本人です。</p></div>
+      <div class="prin-row"><span class="prin-k">1=1</span><p class="prin-h">使う人と、<br>つくる人が同じ。</p><p class="prin-b">つくっているのは大学生です。自分の課題で毎日使い、困ったところから直しています。</p></div>
+      <div class="prin-row"><span class="prin-k">0x0</span><p class="prin-h">書きかけの文章は、<br>個人情報として扱う。</p><p class="prin-b">保存する内容は暗号化し、二段階認証と非公開の履歴に対応しています。ほかの誰かに見られることはありません。</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="products">
+  <div class="wrap">
+    <div class="product-head">
+      <div class="ph-l">
+        <p class="side">// products / 01</p>
+        <p class="pname"><svg class="mk" viewBox="0 0 24 24" aria-hidden="true"><use href="#k-mark"/></svg>THYNORA</p>
+        <p class="ptag-serif">テーマをひとつ入れる。<br>章立てと、読むべき論文が返ってくる。</p>
+      </div>
+      <a class="btn blue" href="https://app.krasis.xyz/" target="_blank" rel="noopener">app.krasis.xyz を開く →</a>
+    </div>
+
+    <div class="app" role="img" aria-label="THYNORAのアプリ画面の例。左にモード一覧、右にアウトライン生成の結果">
+      <div class="app-top">
+        <span class="dots"><span></span><span></span><span></span></span>
+        <span class="t"><svg class="mk" viewBox="0 0 24 24" aria-hidden="true"><use href="#k-mark"/></svg>THYNORA</span>
+        <span class="sep">/</span>
+        <span class="crumb" style="display:inline">SNSと睡眠</span>
+        <span class="plan">FREE</span>
+      </div>
+      <div class="app-body">
+        <div class="app-side">
+          <div class="mi active"><span class="bar"></span><span class="b"><span class="tg"># outline-generator</span><span class="sh">調査アウトラインと関連文献を生成</span></span><span class="ky">⌘1</span></div>
+          <div class="mi"><span class="bar"></span><span class="b"><span class="tg"># logic-guide</span><span class="sh">授業内容をAIに質問</span></span><span class="ky">⌘2</span></div>
+          <div class="mi"><span class="bar"></span><span class="b"><span class="tg"># task-generator</span><span class="sh">課題のたたき台を作成</span></span><span class="ky">⌘3</span></div>
+          <div class="mi"><span class="bar"></span><span class="b"><span class="tg"># task-reminders</span><span class="sh">所要時間を見積もってリマインド</span></span><span class="ky">⌘4</span></div>
+          <div class="mi"><span class="bar"></span><span class="b"><span class="tg"># study-notes</span><span class="sh">要点と全体の流れを整理</span></span><span class="ky">⌘5</span></div>
+        </div>
+        <div class="app-main">
+          <div class="bubble">SNSの利用時間が大学生の睡眠に与える影響<small>field: 社会学 · length: 3,001字〜</small></div>
+          <div class="ans">
+            <h4>SNS利用と大学生の睡眠の質 ─ 就寝前スクリーンタイムに着目して</h4>
+            <ol>
+              <li><b>§1</b><div>序論<span>問題の背景と本レポートの問い</span></div></li>
+              <li><b>§2</b><div>先行研究の整理<span>ブルーライト説と心理的覚醒説</span></div></li>
+              <li><b>§3</b><div>データと方法<span>利用時間・入眠時刻の比較方法</span></div></li>
+              <li><b>§4</b><div>考察と結論<span>対策の提案と今後の課題</span></div></li>
+            </ol>
+          </div>
+          <div class="refs">
+            <span class="lb">RELATED · OpenAlex</span>
+            <div><i>2019</i>若年成人におけるソーシャルメディア利用と睡眠</div>
+            <div><i>2021</i>就寝前のスクリーン利用と睡眠への影響:レビュー</div>
+          </div>
+          <div class="composer"><span>テーマを入力…</span><span class="send">送信 ↵</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="mock-note">※ 画面イメージです</p>
+
+    <div class="ed idx-block">
+      <p class="side">$ thynora modes</p>
+      <div class="idx">
+        <div class="idx-row"><span class="idx-h">アウトライン生成</span><span class="idx-b">テーマ・分野・字数から章立てと論点を組む。関連論文も同時に探し、英語のタイトルは日本語にして見せる。</span><span class="idx-k">⌘1</span></div>
+        <div class="idx-row"><span class="idx-h">授業ガイド</span><span class="idx-b">大学と学部を選び、気になる授業の中身をAIに聞ける。履修を決める前の下調べに。</span><span class="idx-k">⌘2</span></div>
+        <div class="idx-row"><span class="idx-h">課題サポート</span><span class="idx-b">課題の内容から、文章の下書きやExcelの表のたたき台をつくる。</span><span class="idx-k">⌘3</span></div>
+        <div class="idx-row"><span class="idx-h">タスクとリマインド</span><span class="idx-b">やることの所要時間をAIが見積もり、ちょうどいい頃にメールで知らせる。</span><span class="idx-k">⌘4</span></div>
+        <div class="idx-row"><span class="idx-h">学習ノート</span><span class="idx-b">資料を貼り付けると、覚えるべき要点と全体の流れを図にしてまとめる。</span><span class="idx-k">⌘5</span></div>
+      </div>
+    </div>
+
+    <div class="ed idx-block">
+      <p class="side">$ thynora plans</p>
+      <div>
+        <div class="tbl-wrap">
+          <table class="plans-tbl">
+            <thead><tr><th scope="col">Plan</th><th scope="col">Tokens / month</th><th scope="col">For</th><th scope="col" class="r">Price</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Free</th><td class="n">50,000</td><td>まず1本、レポートの骨組みを作ってみる</td><td class="r">¥0</td></tr>
+              <tr><th scope="row">Pro</th><td class="n">300,000</td><td>毎週レポートや課題がある</td><td class="r muted">近日公開</td></tr>
+              <tr><th scope="row">Max</th><td class="n">1,500,000</td><td>卒論・ゼミ論文に長く取り組む</td><td class="r muted">近日公開</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="fine">上限は毎月1日にリセット。AIの出力は必ず自分で確かめ、大学や授業のAI利用ルールに従って使ってください。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="news">
+  <div class="wrap ed">
+    <div class="side-head"><p class="side">// news</p><h2 class="serif">お知らせ</h2></div>
+    <ul class="rows news">
+      <li><time datetime="2026-09-27">2026.09.27</time><span class="tag">[product]</span><span>THYNORA Web版を公開しました</span></li>
+      <li><time datetime="2026-09-16">2026.09.16</time><span class="tag">[security]</span><span>二段階認証とデータ暗号化に対応しました</span></li>
+      <li><time datetime="2026-09-16">2026.09.16</time><span class="tag">[product]</span><span>タスクリマインドと学習ノートを追加しました</span></li>
+      <li><time datetime="2026-09-13">2026.09.13</time><span class="tag">[product]</span><span>メールアドレスだけで登録できるようになりました</span></li>
+      <li><time datetime="2026-08-21">2026.08.21</time><span class="tag">[init]</span><span>最初のコミット。THYNORAの開発を始めました</span></li>
+    </ul>
+  </div>
+</section>
+
+<section class="block" id="company">
+  <div class="wrap ed">
+    <div class="side-head"><p class="side">// company</p><h2 class="serif">会社概要</h2></div>
+    <dl class="rows kv2">
+      <div><dt>name</dt><dd>Krasis(クラシス)</dd></div>
+      <div><dt>ceo</dt><dd>Sasa Hiromichi</dd></div>
+      <div><dt>business</dt><dd>学習支援AIサービスの企画・開発・運営</dd></div>
+      <div><dt>product</dt><dd>THYNORA(大学生のためのAI学習アシスタント)</dd></div>
+      <div><dt>url</dt><dd><a class="lnk" href="https://app.krasis.xyz/" target="_blank" rel="noopener">app.krasis.xyz</a></dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="closing">
+  <div class="wrap inner">
+    <div class="z1">
+      <p class="zero">0<span>→</span>1</p>
+      <blockquote lang="en">“Every time we create something new, we go from 0 to 1.”</blockquote>
+      <p class="cite">— Peter Thiel, <i>Zero to One</i></p>
+      <p class="z-ja">あなたの次のレポートも、ゼロから始まる。</p>
+    </div>
+    <a class="btn white" href="https://app.krasis.xyz/" target="_blank" rel="noopener">THYNORAを無料で使う →</a>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p>© 2026 Krasis</p>
+    <p>THINK BEYOND.</p>
+  </div>
+</footer>
+
+<div class="pal-back" id="pal" hidden>
+  <div class="pal" role="dialog" aria-modal="true" aria-label="ページ内検索">
+    <input id="pal-q" type="text" placeholder="セクション、コマンドを検索…" autocomplete="off" aria-controls="pal-list">
+    <ul id="pal-list" role="listbox"></ul>
+    <div class="ft"><span>↑↓ 選択</span><span>↵ 移動</span><span>esc 閉じる</span></div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const GOLD = [230, 171, 132];
+
+  // ---- ネットワーク構造(層サイズと重み)を作る ----
+  function buildNet(w, h, layers, pad) {
+    const nodes = [], edges = [];
+    const xs = layers.map((_, i) => pad.l + (w - pad.l - pad.r) * i / (layers.length - 1));
+    layers.forEach((n, li) => {
+      const span = Math.min(h - pad.t - pad.b, n * 46);
+      const top = (h - span) / 2;
+      const col = [];
+      for (let k = 0; k < n; k++) {
+        col.push({ x: xs[li], y: n === 1 ? h / 2 : top + span * k / (n - 1), l: li });
+      }
+      nodes.push(col);
+    });
+    for (let li = 0; li < layers.length - 1; li++) {
+      nodes[li].forEach(a => nodes[li + 1].forEach(b => {
+        edges.push({ a, b, l: li, w: Math.pow(Math.random(), 2.2) });
+      }));
+    }
+    return { nodes, edges, xs };
+  }
+  function pickPath(net) {
+    return net.nodes.map(col => col[(Math.random() * col.length) | 0]);
+  }
+  function sizeCanvas(c) {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const r = c.getBoundingClientRect();
+    c.width = Math.max(1, r.width * dpr); c.height = Math.max(1, r.height * dpr);
+    const ctx = c.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w: r.width, h: r.height };
+  }
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const ease = (t) => 1 - Math.pow(1 - t, 3);
+
+  function drawPulse(ctx, path, p, alpha) {
+    // pathに沿って進む光。白→金のグラデーションの尾を引く
+    p = clamp(p); const segs = path.length - 1, pos = p * segs;
+    const i = Math.min(segs - 1, Math.floor(pos)), f = pos - i;
+    const a = path[i], b = path[i + 1];
+    const x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f;
+    const tail = 0.22;
+    const t0 = Math.max(0, f - tail);
+    const tx = a.x + (b.x - a.x) * t0, ty = a.y + (b.y - a.y) * t0;
+    const g = ctx.createLinearGradient(tx, ty, x, y);
+    g.addColorStop(0, `rgba(255,255,255,0)`);
+    g.addColorStop(.5, `rgba(255,255,255,${.8 * alpha})`);
+    g.addColorStop(1, `rgba(${GOLD},${alpha})`);
+    ctx.strokeStyle = g; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
+    ctx.fillStyle = `rgba(${GOLD},${alpha})`;
+    ctx.shadowColor = `rgba(${GOLD},.8)`; ctx.shadowBlur = 10;
+    ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+
+  // ================= 起動演出 =================
+  const splash = document.getElementById('nn-splash');
+  const logEl = document.getElementById('nn-log');
+  let splashDone = false;
+  function endSplash() {
+    if (splashDone) return; splashDone = true;
+    splash.classList.add('done');
+    setTimeout(() => { splash.hidden = true; }, 600);
+  }
+  if (reduce) { splash.hidden = true; splashDone = true; }
+  else {
+    const c = document.getElementById('nn-canvas');
+    let { ctx, w, h } = sizeCanvas(c);
+    const small = w < 640;
+    const layers = small ? [4, 7, 7, 6, 3] : [6, 10, 10, 8, 4];
+    const labels = ['input · embed', 'attention', 'hidden', 'hidden', 'output'];
+    const net = buildNet(w, h, layers, { l: w * (small ? .1 : .14), r: w * (small ? .1 : .14), t: h * .2, b: h * .24 });
+    const pulses = Array.from({ length: small ? 10 : 18 }, (_, i) => ({ path: pickPath(net), d: 0.9 + i * 0.05 + Math.random() * .15 }));
+    const logLines = ['> load model graph', '> layers: ' + layers.join('-'), '> forward pass', '> ready'];
+    const T0 = performance.now();
+    const TOTAL = 2.6;
+    function frame(now) {
+      if (splashDone) return;
+      const t = (now - T0) / 1000;
+      ctx.clearRect(0, 0, w, h);
+      const fade = 1 - clamp((t - 2.0) / 0.5);
+      // edges
+      net.edges.forEach(e => {
+        const k = ease(clamp((t - 0.35 - e.l * 0.16) / 0.45));
+        if (k <= 0) return;
+        const x = e.a.x + (e.b.x - e.a.x) * k, y = e.a.y + (e.b.y - e.a.y) * k;
+        ctx.strokeStyle = `rgba(255,255,255,${(0.04 + e.w * 0.22) * fade})`;
+        ctx.lineWidth = 0.6 + e.w * 0.6;
+        ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(x, y); ctx.stroke();
+      });
+      // nodes + labels
+      net.nodes.forEach((col, li) => {
+        const k = ease(clamp((t - li * 0.12) / 0.35));
+        if (k <= 0) return;
+        col.forEach(n => {
+          ctx.fillStyle = `rgba(8,9,11,1)`;
+          ctx.beginPath(); ctx.arc(n.x, n.y, 4.2 * k, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = `rgba(237,235,230,${0.85 * k * fade})`; ctx.lineWidth = 1.1;
+          ctx.stroke();
+        });
+        const last = col[col.length - 1];
+        ctx.fillStyle = `rgba(143,146,150,${k * fade})`;
+        ctx.font = '400 10.5px "IBM Plex Mono", ui-monospace, monospace';
+        ctx.textAlign = 'center';
+        if (!small || li % 2 === 0) ctx.fillText(labels[li], last.x, last.y + 26);
+        ctx.fillText(`[${col.length}]`, col[0].x, col[0].y - 16);
+      });
+      // pulses
+      pulses.forEach(p => {
+        const k = (t - p.d) / 0.75;
+        if (k > 0 && k < 1) drawPulse(ctx, p.path, ease(k), fade);
+      });
+      // 出力層の点灯
+      if (t > 1.6) {
+        const g = clamp((t - 1.6) / .3) * fade;
+        net.nodes[net.nodes.length - 1].forEach(n => {
+          ctx.fillStyle = `rgba(${GOLD},${g})`;
+          ctx.beginPath(); ctx.arc(n.x, n.y, 3, 0, Math.PI * 2); ctx.fill();
+        });
+      }
+      logEl.textContent = logLines.slice(0, Math.min(logLines.length, 1 + Math.floor(t / 0.5))).join('\n');
+      if (t > 1.45) splash.classList.add('logo');
+      if (t >= TOTAL) { endSplash(); return; }
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    splash.addEventListener('click', endSplash);
+    addEventListener('keydown', endSplash, { once: true });
+    setTimeout(endSplash, 4000); // 念のための保険
+  }
+
+  // ================= ヒーロー背景: 静止したネットワーク + 時々流れる信号 =================
+  const hc = document.getElementById('hero-canvas');
+  let hero = null;
+  function layoutHero() {
+    const s = sizeCanvas(hc);
+    const small = s.w < 900;
+    const layers = small ? [4, 6, 6, 3] : [5, 8, 9, 7, 3];
+    const net = buildNet(s.w, s.h, layers, { l: s.w * (small ? .08 : .48), r: s.w * .06, t: s.h * .12, b: s.h * .12 });
+    hero = { ...s, net, pulses: [] };
+  }
+  function drawHero(now) {
+    const { ctx, w, h, net } = hero;
+    ctx.clearRect(0, 0, w, h);
+    net.edges.forEach(e => {
+      ctx.strokeStyle = `rgba(255,255,255,${0.03 + e.w * 0.12})`;
+      ctx.lineWidth = 0.6 + e.w * 0.5;
+      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
+    });
+    net.nodes.forEach(col => col.forEach(n => {
+      ctx.fillStyle = '#08090b';
+      ctx.beginPath(); ctx.arc(n.x, n.y, 3.4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(237,235,230,.4)'; ctx.lineWidth = 1; ctx.stroke();
+    }));
+    if (now !== undefined) {
+      hero.pulses = hero.pulses.filter(p => now - p.s < 1400);
+      hero.pulses.forEach(p => drawPulse(ctx, p.path, ease((now - p.s) / 1400), .9));
+    }
+  }
+  layoutHero(); drawHero();
+  if (!reduce) {
+    let last = 0;
+    (function loop(now) {
+      if (now - last > 700 && hero.pulses.length < 3) { hero.pulses.push({ path: pickPath(hero.net), s: now }); last = now; }
+      drawHero(now);
+      requestAnimationFrame(loop);
+    })(performance.now());
+  }
+  let rT; addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(() => { layoutHero(); drawHero(); }, 150); });
+
+  // ================= パンくず(現在のセクション) =================
+  const crumb = document.getElementById('crumb');
+  const secs = ['top', 'question', 'principles', 'products', 'news', 'company'].map(id => document.getElementById(id));
+  const names = { top: 'home', question: 'question', principles: 'principles', products: 'products', news: 'news', company: 'company' };
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) crumb.textContent = names[e.target.id]; }), { rootMargin: '-45% 0px -50% 0px' });
+    secs.forEach(s => s && io.observe(s));
+  }
+
+  // ================= ⌘K パレット =================
+  const items = [
+    { k: 'SECTION', label: 'home  トップ', href: '#top' },
+    { k: 'SECTION', label: 'question  問いと、私たちの答え', href: '#question' },
+    { k: 'SECTION', label: 'principles  私たちが決めていること', href: '#principles' },
+    { k: 'SECTION', label: 'products  THYNORA', href: '#products' },
+    { k: 'SECTION', label: 'news  お知らせ', href: '#news' },
+    { k: 'SECTION', label: 'company  会社概要', href: '#company' },
+    { k: 'OPEN', label: 'THYNORA Web版を開く  app.krasis.xyz', href: 'https://app.krasis.xyz/', ext: true },
+  ];
+  const pal = document.getElementById('pal'), q = document.getElementById('pal-q'), list = document.getElementById('pal-list');
+  const opener = document.getElementById('pal-open');
+  let sel = 0, shown = items;
+  function render() {
+    const v = q.value.trim().toLowerCase();
+    shown = items.filter(i => i.label.toLowerCase().includes(v));
+    sel = Math.min(sel, Math.max(0, shown.length - 1));
+    list.innerHTML = '';
+    shown.forEach((it, i) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option'); li.setAttribute('aria-selected', i === sel);
+      li.innerHTML = `<span class="kd"></span><span></span>`;
+      li.children[0].textContent = it.k; li.children[1].textContent = it.label;
+      li.addEventListener('mousemove', () => { if (sel !== i) { sel = i; render(); } });
+      li.addEventListener('click', () => go(it));
+      list.appendChild(li);
+    });
+  }
+  function go(it) {
+    close();
+    if (it.ext) { const a = document.createElement('a'); a.href = it.href; a.target = '_blank'; a.rel = 'noopener'; a.click(); }
+    else document.querySelector(it.href)?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' });
+  }
+  function open() { endSplash(); pal.hidden = false; q.value = ''; sel = 0; render(); q.focus(); }
+  function close() { if (pal.hidden) return; pal.hidden = true; opener.focus(); }
+  opener.addEventListener('click', open);
+  pal.addEventListener('click', e => { if (e.target === pal) close(); });
+  q.addEventListener('input', () => { sel = 0; render(); });
+  addEventListener('keydown', e => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); pal.hidden ? open() : close(); return; }
+    if (pal.hidden) return;
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sel = (sel + 1) % Math.max(1, shown.length); render(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = (sel - 1 + shown.length) % Math.max(1, shown.length); render(); }
+    else if (e.key === 'Enter' && shown[sel]) { e.preventDefault(); go(shown[sel]); }
+  });
+})();
+</script>
+
+</body>
+</html>
