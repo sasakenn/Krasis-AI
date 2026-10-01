@@ -18,6 +18,7 @@ client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 LANGUAGE_NAMES = {
     "en": "English",
     "ja": "Japanese",
+    "ko": "Korean",
     "zh": "Chinese (Simplified)",
     "es": "Spanish",
 }

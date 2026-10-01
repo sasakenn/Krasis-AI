@@ -129,6 +129,18 @@ def test_generate_requires_topic():
     assert resp.status_code == 400
 
 
+def test_literature_translate_accepts_korean_target_lang():
+    with patch("app.translate_titles", return_value={"titles": ["제목1"], "_token_usage": {"input_tokens": 1, "output_tokens": 1}}):
+        resp = client.post("/literature/translate", json={"titles": ["Title 1"], "target_lang": "ko"})
+    assert resp.status_code == 200
+    assert resp.json()["titles"] == ["제목1"]
+
+
+def test_literature_translate_rejects_unsupported_target_lang():
+    resp = client.post("/literature/translate", json={"titles": ["Title 1"], "target_lang": "fr"})
+    assert resp.status_code == 400
+
+
 def test_generate_passes_reference_and_format_notes_and_length_to_prompt():
     captured = {}
 

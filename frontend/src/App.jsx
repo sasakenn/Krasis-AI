@@ -2626,6 +2626,7 @@ const LITERATURE_LANGUAGES = [
   { code: 'natural', label: 'Natural' },
   { code: 'en', label: 'English' },
   { code: 'ja', label: '日本語' },
+  { code: 'ko', label: '한국어' },
   { code: 'zh', label: '中文' },
   { code: 'es', label: 'Español' },
 ]
