@@ -742,7 +742,7 @@ function Workspace({ messages, onMessages, onFirstTopic, onGenerated, onDirtyCha
   const [focused, setFocused] = useState(false)
   const [pendingRequest, setPendingRequest] = useState(null)
   const [awaitingLength, setAwaitingLength] = useState(false)
-  const [attachOpen, setAttachOpen] = useState(false)
+  const [attachOpen, setAttachOpen] = useState(true)
 
   const referenceInputRef = useRef(null)
   const formatInputRef = useRef(null)
