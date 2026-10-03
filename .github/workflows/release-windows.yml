@@ -1,0 +1,50 @@
+# Windows版(Electron)のインストーラーをビルドし、GitHub Releasesに添付する。
+# v* のタグをpushするか、Actions画面から手動実行(バージョンのタグ名を入力)すると動く。
+# 配布ページ(site/download/)は releases/latest の THYNORA-Setup.exe を自動で拾う。
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create or update (e.g. v1.0.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # frontend/package-lock.json は Node 24 で生成されている(Dockerfileと揃える)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install desktop dependencies
+        run: npm install --no-audit --no-fund
+        working-directory: desktop
+
+      - name: Build installer
+        run: npm run dist:win -- --publish never
+        working-directory: desktop
+
+      - name: Attach installer to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: THYNORA ${{ github.event.inputs.tag || github.ref_name }}
+          files: desktop/release/THYNORA-Setup.exe
+          fail_on_unmatched_files: true

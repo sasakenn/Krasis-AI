@@ -3,7 +3,7 @@
   "appName": "THYNORA",
   "webDir": "www",
   "server": {
-    "url": "https://app.example.com",
+    "url": "https://app.krasis.xyz",
     "cleartext": false
   }
 }
