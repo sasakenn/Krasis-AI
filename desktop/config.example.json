@@ -1,5 +1,5 @@
 {
-  "webUrl": "https://app.example.com",
-  "apiOrigin": "https://api.example.com",
+  "webUrl": "https://app.krasis.xyz",
+  "apiOrigin": "https://app.krasis.xyz",
   "startLocalApi": false
 }

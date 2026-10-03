@@ -2,7 +2,7 @@
   "name": "paper-assistant-desktop",
   "version": "1.0.0",
   "private": true,
-  "description": "Paper Assistant desktop shell",
+  "description": "THYNORA desktop shell",
   "main": "main.cjs",
   "scripts": {
     "start": "electron .",
@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "jp.sasahiromichi.paperassistant",
-    "productName": "Paper Assistant",
+    "productName": "THYNORA",
     "directories": { "output": "release" },
     "files": ["main.cjs", "config.example.json"],
     "extraResources": [
@@ -31,6 +31,7 @@
       "target": ["nsis"]
     },
     "nsis": {
+      "artifactName": "THYNORA-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
