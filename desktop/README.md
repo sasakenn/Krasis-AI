@@ -29,6 +29,15 @@ npm run dist:win
 
 `release/` にNSISインストーラーが生成されます。Microsoft Store提出時はパッケージ署名、ストア用メタデータ、プライバシーポリシーURLが必要です。
 
+## ビルド時の注意
+
+- アプリアイコンは`build/icon.png`(1024px)から`electron-builder`が`.icns`/`.ico`を生成する。
+- MacからWindows版を作るには、Apple SiliconならRosetta 2が必要(`softwareupdate --install-rosetta`)。
+  x64向けは`npx electron-builder --win nsis --x64`。Windows機やCIでビルドしてもよい。
+- 未署名のビルドは、MacではGatekeeper、WindowsではSmartScreenの警告が出る。
+- シェルに`ELECTRON_RUN_AS_NODE=1`が設定されていると、起動したElectronアプリがNodeとして動き、
+  すぐ終了する(一部のエディタ/CLI環境で設定されている)。確認時は`env -u ELECTRON_RUN_AS_NODE`で起動する。
+
 ## 課金の扱い
 
 - Web版と公式サイトから直接配布するデスクトップ版: 既存のStripe Checkout / Customer Portalを利用
