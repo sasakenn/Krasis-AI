@@ -15,14 +15,27 @@ Capacitorでラップし、iOS/Androidアプリとして配布するための設
 
 ## 現在の状態
 
-`npm install`で`@capacitor/core`・`@capacitor/cli`・`@capacitor/ios`・`@capacitor/android`と
-`capacitor.config.json`までは作成済みです。ただし、このマシンには`ios/`・`android/`の
-ネイティブプロジェクトを生成するために必要な下記のツールが入っていないため、
-プラットフォームの追加(`npx cap add ios` / `npx cap add android`)は未実施です。
+`android/`と`ios/`のネイティブプロジェクトは生成・`cap sync`済みです。アプリアイコンは
+`assets/`の元画像から`npx @capacitor/assets generate --iconBackgroundColor '#1F3BAE' --android --ios`
+で生成しています(ブランド色の背景に本のアイコン)。
 
-- iOS: CocoaPods(`pod`コマンド)が必要。標準のシステムRuby(2.6系)では最新のCocoaPodsが
-  インストールできないため、Homebrew等で新しいRubyを用意してから`gem install cocoapods`する
-- Android: Android Studio(またはAndroid SDK単体 + `ANDROID_HOME`環境変数の設定)が必要
+- Android: debug APKのビルドとエミュレータでの起動を確認済み。署名・リリースビルドは未実施。
+- iOS: Simulator向けビルドと起動を確認済み。署名・実機・TestFlight・App Store提出は未実施(保留中)。
+
+## ビルド環境の要件(ローカルでビルドする場合)
+
+- Node.js 20以上
+- Android: JDK 21(Temurin等)とAndroid SDK(`platforms;android-35`、`build-tools;35.0.0`)。
+  `JAVA_HOME`と`ANDROID_HOME`を設定してから`cd android && ./gradlew assembleDebug`
+  (出力: `android/app/build/outputs/apk/debug/app-debug.apk`)。
+- iOS: Xcodeと、そのXcodeに対応するiOSプラットフォーム(Xcode > Settings > Components、または
+  `xcodebuild -downloadPlatform iOS`)、CocoaPods。
+  - OS付属のRuby 2.6ではCocoaPodsの導入が難しい。Homebrewの`cocoapods`を使うのが簡単。
+  - Homebrewを使わない場合は`gem install --user-install`でユーザー領域に入れ、
+    `GEM_HOME`と`PATH`(`~/.gem/ruby/2.6.0/bin`)を通す。ネイティブ拡張(`nkf`・`ffi`)が
+    ビルドできないことがあり、`ffi`は古いバージョン(1.15.5)を使う必要があった。
+  - Simulator向けビルド:
+    `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build`
 
 ## セットアップ手順(このリポジトリを開発機で作業する人向け)
 
@@ -35,9 +48,11 @@ npm install
 # 2. iOS: CocoaPodsを用意してからプラットフォームを追加
 #    (Homebrewでのrbenv/CocoaPods導入例。詳細は https://capacitorjs.com/docs/getting-started/environment-setup )
 #    brew install cocoapods
+#    ios/ がまだない場合のみ実行
 npx cap add ios
 
 # 3. Android: Android Studioをインストールし、SDKのパスを通してから
+#    android/ がまだない場合のみ実行
 npx cap add android
 
 # 4. webUrlをcapacitor.config.jsonへ反映してネイティブプロジェクトに同期
@@ -85,6 +100,9 @@ CapacitorのWebView内でも同じ方式で動作しますが、ネイティブ�
 ## 現状のまとめ
 
 - ✅ Capacitorプロジェクトの雛形(`capacitor.config.json`・依存パッケージ・同期スクリプト)
-- ⬜ iOS/Androidのネイティブプロジェクト生成(このマシンではCocoaPods/Android SDK未導入のため未実施)
-- ⬜ 実機・シミュレータでの動作確認
+- ✅ Android/iOSネイティブプロジェクト生成と`cap sync`
+- ✅ Android debug APKのビルド・エミュレータ起動確認
+- ✅ iOS Simulatorビルド・起動確認
+- ⬜ 署名・リリースビルド(Android: キーストア作成、iOS: Developerアカウントが必要)
+- ⬜ 実機での動作確認
 - ⬜ ストアアカウント登録・審査提出

@@ -523,7 +523,7 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Proにアップグレード' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Maxにアップグレード' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'プランを管理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '解約・プラン管理' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'Proにアップグレード' }))
 
@@ -534,14 +534,14 @@ describe('App', () => {
     })
   })
 
-  it('shows a manage-billing button on a paid plan and opens the Stripe portal', async () => {
+  it('shows a cancellation and billing button on a paid plan and opens the Stripe portal', async () => {
     mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'pro' } })
     renderApp()
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'プランを管理' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '解約・プラン管理' })).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'Proにアップグレード' })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'プランを管理' }))
+    fireEvent.click(screen.getByRole('button', { name: '解約・プラン管理' }))
 
     await waitFor(() => {
       const portalCall = global.fetch.mock.calls.find(([url]) => url === '/billing/portal')
