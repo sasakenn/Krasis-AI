@@ -38,10 +38,10 @@ function waitForApi(url, timeoutMs = 15000) {
 }
 
 function startLocalApi() {
-  const executableName = process.platform === 'win32' ? 'paper-assistant-api.exe' : 'paper-assistant-api'
+  const executableName = process.platform === 'win32' ? 'thynora-api.exe' : 'thynora-api'
   const executablePath = app.isPackaged
     ? path.join(process.resourcesPath, 'api', executableName)
-    : process.env.PAPER_ASSISTANT_API_EXECUTABLE
+    : process.env.THYNORA_API_EXECUTABLE
   if (!executablePath || !fs.existsSync(executablePath)) return null
   return spawn(executablePath, [], {
     env: { ...process.env, DESKTOP_MODE: '1', PORT: '8000' },
