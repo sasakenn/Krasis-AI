@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import App from './App.jsx'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import App, { getMicrosoftRedirectUri } from './App.jsx'
 import { LanguageProvider } from './i18n.jsx'
 
 // テストは既定言語(日本語)の文言を前提にしているため、LanguageProviderでラップして描画する。
@@ -968,5 +968,23 @@ describe('SecuritySettings', () => {
     await openSecurityPanel()
 
     await waitFor(() => expect(screen.getByText('ログイン失敗')).toBeInTheDocument())
+  })
+})
+
+describe('getMicrosoftRedirectUri', () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('strips a query string that leaked into the env value', () => {
+    vi.stubEnv('VITE_MICROSOFT_REDIRECT_URI', 'https://app.krasis.xyz/?checkout=cancel')
+    expect(getMicrosoftRedirectUri()).toBe('https://app.krasis.xyz')
+  })
+
+  it('keeps a registered path and falls back to the origin when unset or invalid', () => {
+    vi.stubEnv('VITE_MICROSOFT_REDIRECT_URI', 'https://app.krasis.xyz/auth/callback?x=1')
+    expect(getMicrosoftRedirectUri()).toBe('https://app.krasis.xyz/auth/callback')
+    vi.stubEnv('VITE_MICROSOFT_REDIRECT_URI', 'not a url')
+    expect(getMicrosoftRedirectUri()).toBe(window.location.origin)
+    vi.stubEnv('VITE_MICROSOFT_REDIRECT_URI', '')
+    expect(getMicrosoftRedirectUri()).toBe(window.location.origin)
   })
 })

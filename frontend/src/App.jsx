@@ -366,13 +366,27 @@ function LanguageSwitcher({ className = '' }) {
   )
 }
 
+// Microsoftの認可リダイレクト先。環境変数にクエリ(?checkout=cancel等)やフラグメントが
+// 混入していても、Azureに登録できる形(クエリなし)に正規化する。未設定/不正値は現在のオリジン。
+// 認可リクエストとコード交換リクエストで同じ値を使う必要があるため、両方でこの関数を使う。
+export function getMicrosoftRedirectUri() {
+  const raw = import.meta.env.VITE_MICROSOFT_REDIRECT_URI
+  if (!raw) return window.location.origin
+  try {
+    const u = new URL(raw)
+    return u.pathname === '/' ? u.origin : `${u.origin}${u.pathname}`
+  } catch {
+    return window.location.origin
+  }
+}
+
 function LoginScreen({ onToken, initialMfaToken, initialError }) {
   const { t } = useLanguage()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
   const githubRedirectUri = import.meta.env.VITE_GITHUB_REDIRECT_URI || window.location.origin
   const microsoftClientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
-  const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
+  const microsoftRedirectUri = getMicrosoftRedirectUri()
 
   const [error, setError] = useState(initialError || null)
   const [devLoading, setDevLoading] = useState(false)
@@ -3691,7 +3705,7 @@ export default function App() {
 
     const state = params.get('state')
     const isMicrosoft = state === 'microsoft'
-    const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
+    const microsoftRedirectUri = getMicrosoftRedirectUri()
 
     setAuthExchanging(true)
     fetch(`${API_ORIGIN}/auth/${isMicrosoft ? 'microsoft' : 'github'}`, {
