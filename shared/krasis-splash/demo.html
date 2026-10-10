@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Krasis Splash Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="krasis-splash.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #08090b; color: #8f9296; font: 500 12px/1 'IBM Plex Mono', ui-monospace, monospace; }
+  main { height: 100%; display: grid; place-items: center; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+  button { font: inherit; letter-spacing: .14em; color: #8f9296; background: transparent; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; padding: 12px 20px; cursor: pointer; }
+  button:hover { color: #fff; border-color: rgba(255,255,255,.34); }
+  button:focus-visible { outline: 2px solid #e6ab84; outline-offset: 3px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="row">
+    <button type="button" id="replay">↻ replay</button>
+    <button type="button" id="thynora">THYNORA 版</button>
+  </div>
+</main>
+
+<script src="krasis-splash.js"></script>
+<script>
+  KrasisSplash.play();
+  document.getElementById('replay').addEventListener('click', () => KrasisSplash.play({ force: true }));
+  document.getElementById('thynora').addEventListener('click', () => KrasisSplash.play({ force: true, title: 'THYNORA' }));
+</script>
+</body>
+</html>
