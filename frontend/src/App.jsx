@@ -509,8 +509,22 @@ function LoginScreen({ onToken, initialMfaToken, initialError }) {
     }
   }
 
+  // Google Identity Servicesのスクリプトはasyncで読み込まれるため、ログイン画面の表示時点では
+  // まだwindow.googleが無いことがある。そのまま諦めるとボタンが空のままになるので、読み込み完了まで待つ。
+  const [googleReady, setGoogleReady] = useState(() => Boolean(window.google?.accounts?.id))
   useEffect(() => {
-    if (!googleClientId || !window.google) return
+    if (googleReady || !googleClientId) return undefined
+    const timer = setInterval(() => {
+      if (window.google?.accounts?.id) {
+        setGoogleReady(true)
+        clearInterval(timer)
+      }
+    }, 200)
+    return () => clearInterval(timer)
+  }, [googleReady, googleClientId])
+
+  useEffect(() => {
+    if (!googleClientId || !googleReady || !window.google) return
     window.google.accounts.id.initialize({
       client_id: googleClientId,
       callback: async (response) => {
@@ -537,7 +551,7 @@ function LoginScreen({ onToken, initialMfaToken, initialError }) {
     if (container) {
       window.google.accounts.id.renderButton(container, { theme: 'filled_black', size: 'large', width: 260 })
     }
-  }, [googleClientId, onToken])
+  }, [googleClientId, googleReady, onToken])
 
   function handleGitHubSignIn() {
     const params = new URLSearchParams({
