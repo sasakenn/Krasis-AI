@@ -11,29 +11,51 @@
     "build:web": "npm --prefix ../frontend run build"
   },
   "devDependencies": {
-    "electron": "^36.3.2",
+    "electron": "^44.5.1",
     "electron-builder": "^26.0.12"
   },
   "build": {
     "appId": "jp.sasahiromichi.paperassistant",
     "productName": "THYNORA",
-    "directories": { "output": "release" },
-    "files": ["main.cjs", "config.example.json"],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "config.example.json"
+    ],
     "extraResources": [
-      { "from": "../frontend/dist", "to": "frontend-dist" },
-      { "from": "config.example.json", "to": "config.example.json" }
+      {
+        "from": "../frontend/dist",
+        "to": "frontend-dist"
+      },
+      {
+        "from": "config.example.json",
+        "to": "config.example.json"
+      }
     ],
     "mac": {
       "category": "public.app-category.productivity",
-      "target": ["dmg"]
+      "target": [
+        "dmg"
+      ],
+      "icon": "build/icon.png"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
     },
     "nsis": {
       "artifactName": "THYNORA-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }
-  }
+  },
+  "allowScripts": {
+    "electron@44.5.1": true
+  },
+  "author": "Sasa Hiromichi"
 }

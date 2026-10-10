@@ -366,16 +366,34 @@ function LanguageSwitcher({ className = '' }) {
   )
 }
 
-function LoginScreen({ onToken, initialMfaToken }) {
+// Microsoftの認可リダイレクト先。環境変数にクエリ(?checkout=cancel等)やフラグメントが
+// 混入していても、Azureに登録できる形(クエリなし)に正規化する。未設定/不正値は現在のオリジン。
+// 認可リクエストとコード交換リクエストで同じ値を使う必要があるため、両方でこの関数を使う。
+export function getMicrosoftRedirectUri() {
+  const raw = import.meta.env.VITE_MICROSOFT_REDIRECT_URI
+  if (!raw) return window.location.origin
+  try {
+    const u = new URL(raw)
+    return u.pathname === '/' ? u.origin : `${u.origin}${u.pathname}`
+  } catch {
+    return window.location.origin
+  }
+}
+
+function LoginScreen({ onToken, initialMfaToken, initialError }) {
   const { t } = useLanguage()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
   const githubRedirectUri = import.meta.env.VITE_GITHUB_REDIRECT_URI || window.location.origin
   const microsoftClientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
-  const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
+  const microsoftRedirectUri = getMicrosoftRedirectUri()
 
-  const [error, setError] = useState(null)
+  const [error, setError] = useState(initialError || null)
   const [devLoading, setDevLoading] = useState(false)
+
+  useEffect(() => {
+    if (initialError) setError(initialError)
+  }, [initialError])
 
   // メールアドレス+乱数コードでのログイン(Google/GitHub等のアカウントを使いたくない場合向け)。
   // ログインコードは画面には出さず、メールでのみ届ける(SMTP未設定時はサーバーログに出力)。
@@ -491,8 +509,22 @@ function LoginScreen({ onToken, initialMfaToken }) {
     }
   }
 
+  // Google Identity Servicesのスクリプトはasyncで読み込まれるため、ログイン画面の表示時点では
+  // まだwindow.googleが無いことがある。そのまま諦めるとボタンが空のままになるので、読み込み完了まで待つ。
+  const [googleReady, setGoogleReady] = useState(() => Boolean(window.google?.accounts?.id))
   useEffect(() => {
-    if (!googleClientId || !window.google) return
+    if (googleReady || !googleClientId) return undefined
+    const timer = setInterval(() => {
+      if (window.google?.accounts?.id) {
+        setGoogleReady(true)
+        clearInterval(timer)
+      }
+    }, 200)
+    return () => clearInterval(timer)
+  }, [googleReady, googleClientId])
+
+  useEffect(() => {
+    if (!googleClientId || !googleReady || !window.google) return
     window.google.accounts.id.initialize({
       client_id: googleClientId,
       callback: async (response) => {
@@ -519,7 +551,7 @@ function LoginScreen({ onToken, initialMfaToken }) {
     if (container) {
       window.google.accounts.id.renderButton(container, { theme: 'filled_black', size: 'large', width: 260 })
     }
-  }, [googleClientId, onToken])
+  }, [googleClientId, googleReady, onToken])
 
   function handleGitHubSignIn() {
     const params = new URLSearchParams({
@@ -3679,6 +3711,7 @@ export default function App() {
   // LoginScreenへ渡して認証アプリのコード入力画面を表示させる(画面遷移を伴う
   // リダイレクトフローのため、mfaTokenの状態はここ=親側で一時的に保持する)。
   const [pendingMfaToken, setPendingMfaToken] = useState(null)
+  const [oauthError, setOauthError] = useState(null)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
@@ -3686,7 +3719,7 @@ export default function App() {
 
     const state = params.get('state')
     const isMicrosoft = state === 'microsoft'
-    const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
+    const microsoftRedirectUri = getMicrosoftRedirectUri()
 
     setAuthExchanging(true)
     fetch(`${API_ORIGIN}/auth/${isMicrosoft ? 'microsoft' : 'github'}`, {
@@ -3702,8 +3735,13 @@ export default function App() {
           } else {
             setAuthToken(data.token)
           }
+        } else {
+          // 失敗を黙って握りつぶすとログイン画面に戻っただけ(リロードしたように)見えるため、理由を表示する
+          const body = await resp.json().catch(() => null)
+          setOauthError(typeof body?.detail === 'string' ? body.detail : `HTTP ${resp.status}`)
         }
       })
+      .catch((err) => setOauthError(String(err)))
       .finally(() => {
         setAuthExchanging(false)
         window.history.replaceState({}, '', window.location.pathname)
@@ -4180,7 +4218,7 @@ export default function App() {
   }
 
   if (!authToken) {
-    return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} />
+    return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} initialError={oauthError} />
   }
 
   if (pathname === '/admin') {

@@ -206,11 +206,19 @@ def exchange_microsoft_code_for_user(code: str, redirect_uri: str) -> dict:
             headers={"Accept": "application/json"},
             timeout=10,
         )
-        token_resp.raise_for_status()
+        if not token_resp.ok:
+            # 設定ミス(リダイレクトURIの不一致・シークレット誤り等)の切り分け用に、Microsoftの
+            # エラー内容を返す。応答にはクライアントシークレットなどの秘密情報は含まれない。
+            try:
+                err = token_resp.json()
+                detail = f"{err.get('error')}: {str(err.get('error_description', ''))[:300]}"
+            except ValueError:
+                detail = f"HTTP {token_resp.status_code}"
+            raise AuthError(f"Microsoft sign-in failed: {detail}")
         token_data = token_resp.json()
         access_token = token_data.get("access_token")
         if not access_token:
-            raise AuthError(f"Microsoft did not return an access token: {token_data}")
+            raise AuthError("Microsoft did not return an access token")
 
         user_resp = requests.get(
             MICROSOFT_GRAPH_ME_URL,

@@ -22,3 +22,12 @@ data/
 # editor / OS
 .DS_Store
 .claude/
+
+# build outputs
+desktop/node_modules/
+desktop/release/
+mobile/android/build/
+mobile/android/app/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/ios/App/Pods/
