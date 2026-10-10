@@ -366,7 +366,7 @@ function LanguageSwitcher({ className = '' }) {
   )
 }
 
-function LoginScreen({ onToken, initialMfaToken }) {
+function LoginScreen({ onToken, initialMfaToken, initialError }) {
   const { t } = useLanguage()
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const githubClientId = import.meta.env.VITE_GITHUB_CLIENT_ID
@@ -374,8 +374,12 @@ function LoginScreen({ onToken, initialMfaToken }) {
   const microsoftClientId = import.meta.env.VITE_MICROSOFT_CLIENT_ID
   const microsoftRedirectUri = import.meta.env.VITE_MICROSOFT_REDIRECT_URI || window.location.origin
 
-  const [error, setError] = useState(null)
+  const [error, setError] = useState(initialError || null)
   const [devLoading, setDevLoading] = useState(false)
+
+  useEffect(() => {
+    if (initialError) setError(initialError)
+  }, [initialError])
 
   // メールアドレス+乱数コードでのログイン(Google/GitHub等のアカウントを使いたくない場合向け)。
   // ログインコードは画面には出さず、メールでのみ届ける(SMTP未設定時はサーバーログに出力)。
@@ -3679,6 +3683,7 @@ export default function App() {
   // LoginScreenへ渡して認証アプリのコード入力画面を表示させる(画面遷移を伴う
   // リダイレクトフローのため、mfaTokenの状態はここ=親側で一時的に保持する)。
   const [pendingMfaToken, setPendingMfaToken] = useState(null)
+  const [oauthError, setOauthError] = useState(null)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
@@ -3702,8 +3707,13 @@ export default function App() {
           } else {
             setAuthToken(data.token)
           }
+        } else {
+          // 失敗を黙って握りつぶすとログイン画面に戻っただけ(リロードしたように)見えるため、理由を表示する
+          const body = await resp.json().catch(() => null)
+          setOauthError(typeof body?.detail === 'string' ? body.detail : `HTTP ${resp.status}`)
         }
       })
+      .catch((err) => setOauthError(String(err)))
       .finally(() => {
         setAuthExchanging(false)
         window.history.replaceState({}, '', window.location.pathname)
@@ -4180,7 +4190,7 @@ export default function App() {
   }
 
   if (!authToken) {
-    return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} />
+    return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} initialError={oauthError} />
   }
 
   if (pathname === '/admin') {
