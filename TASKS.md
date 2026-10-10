@@ -1,6 +1,6 @@
 # THYNORA 配布アプリ 残りのタスク
 
-最終更新: 2026-10-04 / Apple 版（iOS・macOS）は保留中
+最終更新: 2026-10-10 / Apple 版（iOS・macOS）は保留中
 
 ## 現状の成果物（すべて未署名）
 - Android: `mobile/android/app/build/outputs/apk/debug/app-debug.apk`（エミュレータで起動確認済み）
@@ -8,12 +8,15 @@
 - macOS: `desktop/release/Paper Assistant-1.0.0-arm64.dmg`（保留。古いアイコンのまま）
 - iOS: `mobile/ios/` にプロジェクト生成済み（保留。Simulator では起動確認済み）
 
-## すぐ対応できるもの
-- [ ] `mobile/README.md` に環境要件を追記（JDK 21、Android SDK、CocoaPods の PATH、Windows ビルド手順、`ELECTRON_RUN_AS_NODE` の注意）
-- [ ] `.gitignore` の整理（`desktop/release/`、`desktop/node_modules/`、`mobile/ios/Pods`、`mobile/android/build` など）
-- [ ] `frontend/index.html` の favicon を本のアイコンに変更
-- [ ] `desktop/package.json` の整備（`author`、`description`、`build.win.icon` の明示）
-- [ ] 変更のコミット（既存の未コミット変更と今回の変更を分けるか決める）
+## 完了済み
+- [x] `mobile/README.md`・`desktop/README.md` にビルド環境の要件を追記
+- [x] `.gitignore` の整理
+- [x] favicon を本のアイコンに変更
+- [x] `desktop/package.json` の整備（author、description、icon）
+- [x] 変更のコミットと push（`main`）
+- [x] Microsoft ログインの有効化（Azure のマルチテナント化とリダイレクト URI の登録、Render の環境変数）
+- [x] ログイン失敗時のエラー表示、Microsoft の戻り先 URI の正規化
+- [x] Google ログインのボタンが消える不具合を修正（公開サイトで確認済み）
 
 ## Windows
 - [ ] **Windows 機で EXE のインストールと起動を確認する（最優先）**
@@ -42,4 +45,3 @@
 ## 仕様や資格情報がなく、未実装・未実行のもの
 - ストア課金、アカウント削除機能、プライバシー対応（ストア審査で必須になることが多い）
 - 審査提出
-- サーバー側の `MICROSOFT_CLIENT_ID` などの OAuth 設定（Microsoft ログインが無効になっている）
