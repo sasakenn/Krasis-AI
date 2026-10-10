@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>THYNORA ダウンロード | Krasis</title>
+<meta name="description" content="THYNORAのWeb版・Windows版・iOS版の入手先。">
+<meta property="og:title" content="THYNORA ダウンロード">
+<meta property="og:description" content="Web、Windows、iPhoneで、同じ続きを。">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M5 5.5 L18.5 12 M5 18.5 L18.5 12' stroke='%2314161A' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='5.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='5' cy='18.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='18.5' cy='12' r='3.3' fill='%23e6ab84'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* site/index.html と同じトークン(THYNORA本体のstyle.cssから移植) */
+  :root {
+    --bg-app: #F6F4EF;
+    --bg-tabbar: #EFECE5;
+    --bg-panel: #ffffff;
+    --border: rgba(20, 22, 26, 0.09);
+    --border-light: rgba(20, 22, 26, 0.14);
+    --text-head: #14161A;
+    --text-body: #3F434A;
+    --muted-ink: #6E6A60;
+    --accent-blue: #1F3BAE;
+    --accent-blue-hover: #182F8F;
+    --accent-green: #0E7C68;
+    --glow-soft: rgba(31, 59, 174, 0.14);
+    --on-accent: #ffffff;
+    --void: #08090b;
+    --void-ink: #EDEBE6;
+    --void-ink-2: #9A9DA1;
+    --void-line: rgba(255, 255, 255, 0.09);
+    --gold: #e6ab84;
+    --font-sans: 'Zen Kaku Gothic New', 'Noto Sans JP', system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+    --font-serif: 'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+      --border: #2A2B2C; --border-light: #333536;
+      --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+      --accent-blue: #3A94BC; --accent-blue-hover: #6CADDF; --accent-green: #86CF86;
+      --glow-soft: rgba(58, 148, 188, 0.18);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+    --border: #2A2B2C; --border-light: #333536;
+    --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+    --accent-blue: #3A94BC; --accent-blue-hover: #6CADDF; --accent-green: #86CF86;
+    --glow-soft: rgba(58, 148, 188, 0.18);
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-head); font-family: var(--font-sans); font-size: 15px; line-height: 1.8; -webkit-font-smoothing: antialiased; font-feature-settings: "palt"; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; border-radius: 3px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 24px; }
+  @media (max-width: 480px) { .wrap { padding-inline: 16px; } }
+
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg-tabbar); border-bottom: 1px solid var(--border); }
+  .topbar .wrap { display: flex; align-items: center; gap: 12px; height: 46px; }
+  .brand { display: inline-flex; align-items: center; gap: 7px; font: 500 11px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-head); text-decoration: none; }
+  .brand svg { width: 15px; height: 15px; color: var(--accent-blue); }
+  .sep { font: 400 11px/1 var(--font-mono); color: var(--muted-ink); }
+  .crumb { font-size: 12.5px; font-weight: 500; }
+  .spacer { flex: 1; }
+  .back { font: 400 12px/1 var(--font-mono); color: var(--muted-ink); text-decoration: none; }
+  .back:hover { color: var(--text-head); }
+
+  .hero { position: relative; overflow: hidden; isolation: isolate; background: var(--void); color: var(--void-ink); padding-block: 88px 80px; }
+  .hero canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; }
+  .hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, rgba(8,9,11,.94) 0%, rgba(8,9,11,.7) 50%, rgba(8,9,11,.2) 100%); }
+  .eyebrow { margin: 0 0 20px; font: 500 11.5px/1 var(--font-mono); letter-spacing: .18em; color: var(--gold); }
+  .hero h1 { margin: 0 0 18px; font: 800 clamp(2.2rem, 5vw, 4rem)/1.25 var(--font-serif); letter-spacing: .01em; }
+  .hero h1 em { font-style: normal; color: var(--gold); }
+  .hero p { margin: 0; max-width: 34em; color: var(--void-ink-2); line-height: 2; }
+
+  .platforms { padding-block: 72px 96px; }
+  .side { margin: 0 0 18px; font: 500 12px/1.6 var(--font-mono); color: var(--muted-ink); }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+  .card { display: flex; flex-direction: column; gap: 14px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 26px 24px 24px; }
+  .card.live { border-color: var(--accent-blue); box-shadow: 0 0 0 3px var(--glow-soft); }
+  .card-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .icon { width: 36px; height: 36px; color: var(--text-head); }
+  .state { font: 500 11px/1 var(--font-mono); letter-spacing: .04em; padding: 6px 9px; border-radius: 5px; border: 1px solid var(--border-light); color: var(--muted-ink); white-space: nowrap; }
+  .state.on { color: var(--accent-green); border-color: currentColor; }
+  .card h2 { margin: 0; font: 700 1.5rem/1.3 var(--font-serif); }
+  .card .tag { margin: -6px 0 0; font: 400 11.5px/1.6 var(--font-mono); color: var(--muted-ink); }
+  .card p { margin: 0; color: var(--text-body); font-size: .92rem; line-height: 1.85; flex-grow: 1; }
+  .meta { margin: 0; font: 400 11.5px/1.7 var(--font-mono); color: var(--muted-ink); min-height: 1.7em; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 46px; padding: 0 20px; border-radius: 8px; font: 700 .95rem/1 var(--font-sans); text-decoration: none; border: 1px solid transparent; transition: background-color .15s; }
+  .btn.primary { background: var(--accent-blue); color: var(--on-accent); }
+  .btn.primary:hover { background: var(--accent-blue-hover); }
+  .btn[aria-disabled="true"] { background: transparent; border-color: var(--border-light); color: var(--muted-ink); cursor: not-allowed; pointer-events: none; }
+
+  .notes { margin-top: 56px; display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 72px; }
+  @media (max-width: 860px) { .notes { grid-template-columns: minmax(0, 1fr); } }
+  .notes ul { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--border-light); }
+  .notes li { padding-block: 14px; border-bottom: 1px solid var(--border); color: var(--text-body); font-size: .92rem; }
+  .notes b { color: var(--text-head); font-weight: 700; }
+
+  footer { background: var(--void); color: var(--void-ink-2); border-top: 1px solid var(--void-line); padding-block: 22px 30px; font: 400 11.5px/1.6 var(--font-mono); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Krasis トップへ">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/></svg>KRASIS
+    </a>
+    <span class="sep">/</span>
+    <span class="crumb">download</span>
+    <span class="spacer"></span>
+    <a class="back" href="/">← home</a>
+  </div>
+</header>
+
+<section class="hero">
+  <canvas id="net" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <p class="eyebrow">THYNORA · DOWNLOAD</p>
+    <h1>どこからでも、<br><em>同じ続き</em>を。</h1>
+    <p>THYNORAは、ブラウザ・Windows・iPhoneのどれからでも使えます。アカウントが同じなら、履歴も下書きもそのまま続きから開けます。</p>
+  </div>
+</section>
+
+<main class="platforms">
+  <div class="wrap">
+    <p class="side">$ thynora install</p>
+    <div class="grid">
+
+      <article class="card live" id="card-web">
+        <div class="card-top">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.7 3.8 5.9 3.8 9s-1.2 6.3-3.8 9c-2.6-2.7-3.8-5.9-3.8-9S9.4 5.7 12 3z"/></svg>
+          <span class="state on">● live</span>
+        </div>
+        <h2>Web版</h2>
+        <p class="tag">Chrome · Safari · Edge · Firefox</p>
+        <p>インストールは要りません。ブラウザで開いて、そのままログインできます。いちばん早く最新の機能が届きます。</p>
+        <p class="meta">app.krasis.xyz</p>
+        <a class="btn primary" id="btn-web" href="https://app.krasis.xyz/" target="_blank" rel="noopener">Web版を開く →</a>
+      </article>
+
+      <article class="card" id="card-win">
+        <div class="card-top">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M3 5.6 10.4 4.5v7.1H3z"/><path d="M11.4 4.4 21 3v8.6h-9.6z"/><path d="M3 12.6h7.4v7.1L3 18.6z"/><path d="M11.4 12.6H21V21l-9.6-1.4z"/></svg>
+          <span class="state" id="win-state">○ 準備中</span>
+        </div>
+        <h2>Windows版</h2>
+        <p class="tag">Windows 10 / 11 · x64</p>
+        <p>デスクトップアプリとして、タスクバーからワンクリックで起動できます。インストーラーを開いて、案内に沿って進めるだけです。</p>
+        <p class="meta" id="win-meta">最初のリリースを準備しています。</p>
+        <a class="btn primary" id="btn-win" href="#" aria-disabled="true">準備中</a>
+      </article>
+
+      <article class="card" id="card-ios">
+        <div class="card-top">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="6.5" y="2.5" width="11" height="19" rx="2.4"/><path d="M10.5 18.5h3"/></svg>
+          <span class="state" id="ios-state">○ 準備中</span>
+        </div>
+        <h2>iPhone版</h2>
+        <p class="tag">iOS 16 以降</p>
+        <p>通学中や授業の合間に、スマホから同じアカウントで続きを書けます。App Storeでの公開に向けて準備しています。</p>
+        <p class="meta" id="ios-meta">それまではSafariでWeb版を開き、「ホーム画面に追加」すると、アプリのように使えます。</p>
+        <a class="btn primary" id="btn-ios" href="#" aria-disabled="true">準備中</a>
+      </article>
+
+    </div>
+
+    <div class="notes">
+      <p class="side">// notes</p>
+      <ul>
+        <li><b>アカウントは共通です。</b>どの版でも、同じログイン方法を選べば同じデータが表示されます。</li>
+        <li><b>Windowsで警告が出たとき：</b>「WindowsによってPCが保護されました」と表示されたら、「詳細情報」→「実行」で進めます。配布元は Krasis です。</li>
+        <li><b>料金は全版で共通です。</b>プランの購入と解約は、Web版のアカウント画面から行えます。</li>
+      </ul>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Krasis</span>
+    <span>THINK BEYOND.</span>
+  </div>
+</footer>
+
+<script>
+(() => {
+  // ---------- 配布先の状態を反映 ----------
+  const winBtn = document.getElementById('btn-win');
+  const winState = document.getElementById('win-state');
+  const winMeta = document.getElementById('win-meta');
+  const iosBtn = document.getElementById('btn-ios');
+  const iosState = document.getElementById('ios-state');
+  const iosMeta = document.getElementById('ios-meta');
+
+  function enable(btn, state, href, label) {
+    btn.href = href;
+    btn.removeAttribute('aria-disabled');
+    btn.target = '_blank';
+    btn.rel = 'noopener';
+    btn.textContent = label;
+    state.textContent = '● available';
+    state.classList.add('on');
+    btn.closest('.card').classList.add('live');
+  }
+
+  function formatDate(iso) {
+    try { return new Date(iso).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' }); }
+    catch (e) { return ''; }
+  }
+
+  async function loadManifest() {
+    try {
+      const res = await fetch('downloads.json', { cache: 'no-cache' });
+      if (res.ok) return await res.json();
+    } catch (e) { /* 取得できなくても既定値で続ける */ }
+    return {};
+  }
+
+  async function setupWindows(cfg) {
+    const repo = cfg.github_repo || 'sasakenn/Krasis-AI';
+    const asset = cfg.asset_name || 'THYNORA-Setup.exe';
+    if (cfg.url_override) {
+      enable(winBtn, winState, cfg.url_override, 'インストーラーをダウンロード');
+      winMeta.textContent = asset;
+      return;
+    }
+    try {
+      const res = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+      if (!res.ok) return;
+      const release = await res.json();
+      const file = (release.assets || []).find((a) => a.name === asset);
+      if (!file) return;
+      enable(winBtn, winState, file.browser_download_url, 'インストーラーをダウンロード');
+      const mb = file.size ? ` · ${(file.size / 1048576).toFixed(0)} MB` : '';
+      winMeta.textContent = `${release.tag_name || ''} · ${formatDate(release.published_at)}${mb}`;
+    } catch (e) { /* 準備中のまま */ }
+  }
+
+  function setupIos(cfg) {
+    if (!cfg.url) return;
+    enable(iosBtn, iosState, cfg.url, `${cfg.label || 'App Store'}で入手`);
+    iosMeta.textContent = 'iPhoneでこのボタンを押すと、ストアのページが開きます。';
+  }
+
+  loadManifest().then((m) => {
+    if (m.web && m.web.url) document.getElementById('btn-web').href = m.web.url;
+    setupWindows(m.windows || {});
+    setupIos(m.ios || {});
+  });
+
+  // ---------- 背景の静かなネットワーク(トップページと同じモチーフ) ----------
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const c = document.getElementById('net');
+  const ctx = c.getContext('2d');
+  let net = null;
+  function layout() {
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    const r = c.getBoundingClientRect();
+    c.width = Math.max(1, r.width * dpr); c.height = Math.max(1, r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const small = r.width < 860;
+    const layers = small ? [3, 5, 5, 2] : [4, 7, 7, 5, 2];
+    const l = r.width * (small ? .1 : .52), w = r.width * (small ? .82 : .4);
+    const cols = layers.map((n, li) => {
+      const x = l + w * li / (layers.length - 1);
+      const span = Math.min(r.height * .72, (n - 1) * 52);
+      const top = (r.height - span) / 2;
+      return Array.from({ length: n }, (_, k) => ({ x, y: n === 1 ? r.height / 2 : top + span * k / (n - 1) }));
+    });
+    const edges = [];
+    let i = 0;
+    for (let li = 0; li < cols.length - 1; li++) cols[li].forEach((a) => cols[li + 1].forEach((b) => {
+      i++; const rnd = Math.abs(Math.sin(i * 12.9898) * 43758.5453) % 1;
+      edges.push({ a, b, w: Math.pow(rnd, 2.2) });
+    }));
+    net = { w: r.width, h: r.height, cols, edges, pulses: [] };
+  }
+  function draw(now) {
+    ctx.clearRect(0, 0, net.w, net.h);
+    net.edges.forEach((e) => {
+      ctx.strokeStyle = `rgba(255,255,255,${0.03 + e.w * 0.12})`;
+      ctx.lineWidth = 0.6 + e.w * 0.5;
+      ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke();
+    });
+    net.cols.forEach((col) => col.forEach((n) => {
+      ctx.fillStyle = '#08090b';
+      ctx.beginPath(); ctx.arc(n.x, n.y, 3.2, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(237,235,230,.4)'; ctx.lineWidth = 1; ctx.stroke();
+    }));
+    if (now === undefined) return;
+    net.pulses = net.pulses.filter((p) => now - p.s < 1400);
+    net.pulses.forEach((p) => {
+      const t = Math.max(0, Math.min(1, (now - p.s) / 1400));
+      const k = 1 - Math.pow(1 - t, 3);
+      const segs = p.path.length - 1, pos = k * segs;
+      const si = Math.min(segs - 1, Math.floor(pos)), f = pos - si;
+      const a = p.path[si], b = p.path[si + 1];
+      const x = a.x + (b.x - a.x) * f, y = a.y + (b.y - a.y) * f;
+      ctx.fillStyle = 'rgba(230,171,132,.9)';
+      ctx.shadowColor = 'rgba(230,171,132,.8)'; ctx.shadowBlur = 10;
+      ctx.beginPath(); ctx.arc(x, y, 2.2, 0, Math.PI * 2); ctx.fill();
+      ctx.shadowBlur = 0;
+    });
+  }
+  layout(); draw();
+  if (!reduce) {
+    let last = 0;
+    (function loop(now) {
+      if (now - last > 900 && net.pulses.length < 2) {
+        net.pulses.push({ path: net.cols.map((col) => col[(Math.random() * col.length) | 0]), s: now });
+        last = now;
+      }
+      draw(now);
+      requestAnimationFrame(loop);
+    })(performance.now());
+  }
+  let rT; addEventListener('resize', () => { clearTimeout(rT); rT = setTimeout(() => { layout(); draw(); }, 150); });
+})();
+</script>
+</body>
+</html>

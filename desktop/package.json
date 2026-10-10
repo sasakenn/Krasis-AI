@@ -16,7 +16,7 @@
   },
   "build": {
     "appId": "jp.sasahiromichi.paperassistant",
-    "productName": "Paper Assistant",
+    "productName": "THYNORA",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -49,6 +49,7 @@
       "icon": "build/icon.png"
     },
     "nsis": {
+      "artifactName": "THYNORA-Setup.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true
     }

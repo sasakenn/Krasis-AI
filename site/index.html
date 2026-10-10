@@ -477,6 +477,10 @@
   .closing .cite { color: var(--void-ink-2); }
   .z-ja { margin: 6px 0 0 !important; font: 700 clamp(1.1rem, 2vw, 1.5rem)/1.5 var(--font-serif); color: var(--void-ink) !important; }
 
+  .btn.dl { border-color: var(--border-light); color: var(--text-head); }
+  .btn.dl:hover { border-color: var(--accent-blue); color: var(--accent-blue); }
+  .term a.w { text-decoration: none; }
+  .term a.w:hover { color: var(--gold); }
   @media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
 </style>
 </head>
@@ -511,6 +515,7 @@
       <a href="#principles">principles</a>
       <a href="#products">products</a>
       <a href="#news">news</a>
+      <a href="/download/">download</a>
       <a href="#company">company</a>
     </nav>
     <span class="spacer"></span>
@@ -539,7 +544,7 @@ modes    <span class="w">5</span>  outline · guide · notes …
 search   <span class="w">OpenAlex</span> + 和訳
 auth     <span class="w">MFA</span> · 4 login methods
 storage  <span class="w">encrypted</span> at rest
-apps     <span class="c">○ building</span>  mac · win · ios
+apps     <a class="w" href="/download/">→ /download</a>  win · ios
 <span class="p">$</span> <span class="caret"></span></pre>
     </div>
   </div>
@@ -580,7 +585,7 @@ apps     <span class="c">○ building</span>  mac · win · ios
         <p class="pname"><svg class="mk" viewBox="0 0 24 24" aria-hidden="true"><use href="#k-mark"/></svg>THYNORA</p>
         <p class="ptag-serif">テーマをひとつ入れる。<br>章立てと、読むべき論文が返ってくる。</p>
       </div>
-      <a class="btn blue" href="https://app.krasis.xyz/" target="_blank" rel="noopener">app.krasis.xyz を開く →</a>
+      <div class="cta-row" style="margin-top:0"><a class="btn blue" href="https://app.krasis.xyz/" target="_blank" rel="noopener">app.krasis.xyz を開く →</a><a class="btn dl" href="/download/">Windows / iPhone 版</a></div>
     </div>
 
     <div class="app" role="img" aria-label="THYNORAのアプリ画面の例。左にモード一覧、右にアウトライン生成の結果">

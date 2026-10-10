@@ -15,14 +15,14 @@
     <!-- Googleでのサインインに使うJS SDK。クライアントID未設定時はそもそもボタンが
          無効化されるので、読み込めなくても本体の動作には影響しない。 -->
     <script async src="https://accounts.google.com/gsi/client"></script>
-    <!-- 起動演出: 深いダーク背景の上を、白から金へ抜けるグラデーションの細い光の筋が
-         斜めに静かに流れるだけ。丸い光の点滅などは付けず、そのままフェードで本体へ引き渡す。
-         style.css(バンドル)を待たずに出したいのでここにインラインで定義する。
+    <!-- 起動演出: krasis.xyz と同じニューラルネットワークの投影(shared/krasis-splash/ の部品)。
+         CSPのscript-srcが'self'のみなので、JS/CSSはどちらもpublic/から同一オリジンで読み込む。
 
-         html/bodyの背景も、本体のCSS(style.css)が読み込まれるより前から
+         html/bodyの背景は、本体のCSS(style.css)が読み込まれるより前から
          アプリと同じ色にしておく。これが無いと、読み込みが遅い回線などで
-         演出の固定タイマーが先に終わってしまった場合に、ブラウザ既定の
-         白背景がむき出しになる(「起動演出の後に白塗りになる」バグの原因)。 -->
+         演出が先に終わってしまった場合に、ブラウザ既定の白背景がむき出しになる
+         (「起動演出の後に白塗りになる」バグの原因)。 -->
+    <link rel="stylesheet" href="/krasis-splash.css" />
     <style>
       html, body {
         background: #F6F4EF;
@@ -30,105 +30,25 @@
       @media (prefers-color-scheme: dark) {
         html, body { background: #121314; }
       }
-
-      #intro-splash {
-        position: fixed;
-        inset: 0;
-        z-index: 9999;
-        overflow: hidden;
-        background: #08090b;
-        pointer-events: none;
-        opacity: 1;
-        transition: opacity .55s cubic-bezier(.4, 0, .2, 1);
-      }
-      /* 固定時間で消すのではなく、後述のスクリプトがアプリの起動完了を検知してから
-         このクラスを付与する(=最低表示時間とアプリの実際の準備完了の両方を待つ)。 */
-      #intro-splash.intro-splash-hidden {
-        opacity: 0;
-        visibility: hidden;
-      }
-
-      .intro-streak {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        height: 1.5px;
-        width: var(--len);
-        background: linear-gradient(90deg,
-          rgba(255, 255, 255, 0) 0%,
-          #ffffff 42%,
-          #e6ab84 75%,
-          rgba(230, 171, 132, 0) 100%);
-        filter: drop-shadow(0 0 3px rgba(230, 171, 132, .55));
-        transform-origin: 0 50%;
-        opacity: 0;
-        animation: intro-streak-flow .95s cubic-bezier(.3, 0, .2, 1) var(--delay) forwards;
-      }
-      @keyframes intro-streak-flow {
-        0%   { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(-56vmin); opacity: 0; }
-        18%  { opacity: 1; }
-        68%  { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(8vmin); opacity: 1; }
-        100% { transform: translate(-50%, -50%) rotate(var(--angle)) translateX(30vmin); opacity: 0; }
-      }
-
-      #intro-logo-wrap {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        text-align: center;
-      }
-
-      #intro-logo {
-        font-family: 'IBM Plex Mono', ui-monospace, monospace;
-        font-size: clamp(26px, 5vw, 42px);
-        font-weight: 500;
-        letter-spacing: 0.28em;
-        color: #ffffff;
-        text-shadow: 0 0 24px rgba(230, 171, 132, .35);
-        opacity: 0;
-        animation: intro-logo-fade 1.1s cubic-bezier(.3, 0, .2, 1) .25s forwards;
-      }
-      @keyframes intro-logo-fade {
-        0%   { opacity: 0; letter-spacing: 0.5em; }
-        100% { opacity: 1; letter-spacing: 0.28em; }
-      }
-
-      #intro-tagline {
-        margin-top: 0.6em;
-        font-family: 'IBM Plex Mono', ui-monospace, monospace;
-        font-size: clamp(11px, 1.4vw, 14px);
-        font-weight: 400;
-        letter-spacing: 0.32em;
-        color: #e6ab84;
-        opacity: 0;
-        animation: intro-logo-fade 1.1s cubic-bezier(.3, 0, .2, 1) .45s forwards;
-      }
-
-      @media (prefers-reduced-motion: reduce) {
-        #intro-splash { transition-duration: .15s; }
-        .intro-streak { animation-duration: .2s; animation-delay: 0s; }
-        #intro-logo { animation-duration: .2s; animation-delay: 0s; }
-      }
     </style>
   </head>
   <body>
-    <div id="intro-splash">
-      <div class="intro-streak" style="--angle:-62deg; --len:34vmin; --delay:0s"></div>
-      <div class="intro-streak" style="--angle:-28deg; --len:42vmin; --delay:.08s"></div>
-      <div class="intro-streak" style="--angle:-8deg;  --len:30vmin; --delay:.18s"></div>
-      <div class="intro-streak" style="--angle:18deg;  --len:46vmin; --delay:.05s"></div>
-      <div class="intro-streak" style="--angle:46deg;  --len:36vmin; --delay:.22s"></div>
-      <div class="intro-streak" style="--angle:78deg;  --len:40vmin; --delay:.12s"></div>
-      <div id="intro-logo-wrap">
-        <div id="intro-logo">THYNORA</div>
-        <div id="intro-tagline">Think Beyond.</div>
+    <!-- JSより先に黒い画面を出すため、起動演出の枠はHTMLに直接置く。
+         描画は krasis-splash.js、消すタイミングは intro-splash.js が担当する。 -->
+    <div id="nn-splash" aria-hidden="true">
+      <canvas></canvas>
+      <div class="nn-logo">
+        <svg class="nn-mk" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/></svg>
+        <b>THYNORA</b><span>THINK BEYOND.</span>
       </div>
+      <div class="nn-log"></div>
+      <div class="nn-skip">click to skip</div>
     </div>
     <div id="root"></div>
-    <!-- 起動演出を消すタイミング制御。CSPのscript-srcが'unsafe-inline'を含まないため
+    <!-- 起動演出の描画と、消すタイミングの制御。CSPのscript-srcが'unsafe-inline'を含まないため
          インラインscriptでは実行できず、'self'から読み込める外部ファイルにしてある
          (詳細はintro-splash.js内のコメント参照)。 -->
+    <script src="/krasis-splash.js"></script>
     <script src="/intro-splash.js"></script>
     <script type="module" src="/src/main.jsx"></script>
   </body>

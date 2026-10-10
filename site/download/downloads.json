@@ -1,0 +1,14 @@
+{
+  "web": {
+    "url": "https://app.krasis.xyz/"
+  },
+  "windows": {
+    "github_repo": "sasakenn/Krasis-AI",
+    "asset_name": "THYNORA-Setup.exe",
+    "url_override": ""
+  },
+  "ios": {
+    "url": "",
+    "label": "App Store"
+  }
+}

@@ -68,7 +68,7 @@ async function createWindow() {
 }
 
 app.whenReady().then(() => createWindow().catch((error) => {
-  dialog.showErrorBox('Paper Assistantを起動できません', error.message)
+  dialog.showErrorBox('THYNORAを起動できません', error.message)
   app.quit()
 }))
 
