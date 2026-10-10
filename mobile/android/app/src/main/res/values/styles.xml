@@ -16,7 +16,13 @@
     </style>
 
 
+    <!-- 起動画面。Android 11以前は splash.png(暗い背景にニューロンマーク)を全面に出し、
+         Android 12以降はシステムの起動画面に同じ色とマークを出す。
+         Web版が読み込まれると、続けてニューラルネットワークの起動演出が再生される。 -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_mark</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

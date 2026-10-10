@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pyotp
 
-ISSUER_NAME = "Paper Assistant"
+ISSUER_NAME = "THYNORA"
 
 
 def generate_secret() -> str:

@@ -126,7 +126,7 @@ def _send_due_task_reminders() -> None:
             deadline_line = f"締切: {task['deadline']}\n" if task.get("deadline") else ""
             send_email(
                 task["email"],
-                "【Paper Assistant】タスクのリマインド",
+                "【THYNORA】タスクのリマインド",
                 f"見積もっていた作業時間の目安になりました:\n\n"
                 f"{task['description']}\n\n"
                 f"見積もり所要時間: 約{task['estimated_minutes']}分\n"
@@ -1178,7 +1178,7 @@ def auth_code_signup(payload: CodeSignupRequest, request: Request):
 
     send_email(
         email,
-        "【Paper Assistant】ログインコードの発行",
+        "【THYNORA】ログインコードの発行",
         f"あなたのログインコードは次の通りです:\n\n{code}\n\n"
         "このコードはログインに必要です。他人に教えず、紙などに控えて安全に保管してください。",
     )
@@ -1270,7 +1270,7 @@ def auth_code_reissue(payload: CodeReissueRequest, request: Request):
         update_code_login_hash(record["user_id"], _hash_code(new_code))
         send_email(
             email,
-            "【Paper Assistant】ログインコードの再発行",
+            "【THYNORA】ログインコードの再発行",
             f"新しいログインコードは次の通りです:\n\n{new_code}\n\n"
             "以前のコードは無効になりました。他人に教えず、紙などに控えて安全に保管してください。",
         )

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- ローカルファイルだけを読み込む起動画面なので、外部への通信はすべて禁止する -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:">
+<title>THYNORA</title>
+<link rel="stylesheet" href="krasis-splash.css">
+<link rel="stylesheet" href="splash.css">
+</head>
+<body>
+<!-- 描画前から黒い画面を出すため、起動演出の枠をHTMLに直接置く(krasis-splash.js が再利用する) -->
+<div id="nn-splash" aria-hidden="true">
+  <canvas></canvas>
+  <div class="nn-logo">
+    <svg class="nn-mk" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/></svg>
+    <b>THYNORA</b><span>THINK BEYOND.</span>
+  </div>
+  <div class="nn-log"></div>
+  <div class="nn-skip"></div>
+</div>
+<script src="krasis-splash.js"></script>
+<script src="splash.js"></script>
+</body>
+</html>
