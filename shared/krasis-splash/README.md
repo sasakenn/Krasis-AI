@@ -41,13 +41,17 @@ KrasisSplash.play({
   skippable: true,          // クリック・キー入力で飛ばせる
   showLog: true,            // 左下の "> load model graph" ログ
   onDone: () => {},         // 消え終わったときに呼ばれる
+  until: promise,           // 渡すと、演出が終わってもこれが解決するまでロゴを出したまま待つ
+  maxWait: 6000,            // until を待つ上限(ミリ秒)。過ぎたら必ず消える
 });
 KrasisSplash.skip();        // 外から終わらせる
 ```
 
 ## 注意
 
+- `frontend/public/` に同じファイルのコピーがある（THYNORAアプリの起動画面）。こちらを直したら、あちらにもコピーすること。
 - OS で「視差効果を減らす」（prefers-reduced-motion）を有効にしている人には、既定では表示しない。`force: true` を渡すと表示する。
 - 画面全体を覆う（`z-index: 2147483000`）。
+- JS より先に黒い画面を出したいときは、`#nn-splash` のマークアップ（`frontend/index.html` を参照）を HTML に直接書いておく。JS はそれを再利用する。
 - フォントは IBM Plex Mono。読み込んでいなければ、等幅の代わりのフォントで表示される。
 - CSP で `style-src 'unsafe-inline'` を許可していないアプリでは、JS による CSS の自動挿入がブロックされる。`krasis-splash.css` を `<link>` で読み込めば動く。読み込み済みなら、JS は CSS を挿入しない。

@@ -15,6 +15,8 @@
  *     skippable: true,            // クリック/キー入力で飛ばせる
  *     showLog: true,              // 左下の "> load model graph" ログ
  *     onDone: () => {},           // 消え終わったときに呼ばれる
+ *     until: promise,             // 渡すと、演出が終わってもこれが解決するまでロゴを出したまま待つ
+ *     maxWait: 6000,              // until を待つ上限(ミリ秒)。過ぎたら必ず消える
  *   });
  *   KrasisSplash.skip();          // 外から即座に終了させる
  *
@@ -152,7 +154,8 @@
   function play(options) {
     var opts = Object.assign({
       title: 'KRASIS', tagline: 'THINK BEYOND.', duration: 2.6,
-      force: false, skippable: true, showLog: true, onDone: null
+      force: false, skippable: true, showLog: true, onDone: null,
+      until: null, maxWait: 6000
     }, options || {});
 
     // <head> の中で呼ばれた場合は、body ができてから再生する
@@ -162,7 +165,13 @@
     }
     if (current) current.end(true);
     var reduce = global.matchMedia && global.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce && !opts.force) { if (opts.onDone) opts.onDone(); return; }
+    if (reduce && !opts.force) {
+      // HTMLに静的に置かれた #nn-splash があれば、それも閉じておく
+      var pre = document.getElementById(ROOT_ID);
+      if (pre) pre.hidden = true;
+      if (opts.onDone) opts.onDone();
+      return;
+    }
 
     ensureStyle();
     var splash = ensureRoot(opts);
@@ -174,6 +183,12 @@
     // 元の演出は2.6秒基準。duration に合わせて時間軸を伸縮する。
     var S = opts.duration / 2.6;
     var finished = false, timer = null;
+    // until が解決するまでは、演出が終わってもロゴだけ残して待つ
+    var ready = !opts.until, waiting = false;
+    if (opts.until) {
+      var markReady = function () { ready = true; if (waiting) end(false); };
+      Promise.resolve(opts.until).then(markReady, markReady);
+    }
 
     function end(immediate) {
       if (finished) return; finished = true;
@@ -245,7 +260,10 @@
       }
       logEl.textContent = logLines.slice(0, Math.min(logLines.length, 1 + Math.floor(t / 0.5))).join('\n');
       if (t > 1.45) splash.classList.add('logo');
-      if (t >= 2.6) { end(false); return; }
+      if (t >= 2.6) {
+        if (ready) { end(false); return; }
+        waiting = true; ctx.clearRect(0, 0, w, h); return; // ロゴだけの状態で待つ
+      }
       requestAnimationFrame(frame);
     }
 
@@ -254,11 +272,12 @@
       splash.addEventListener('click', onSkip);
       global.addEventListener('keydown', onSkip, { once: true });
     }
-    timer = setTimeout(onSkip, (opts.duration + 1.4) * 1000); // 念のための保険
+    // 念のための保険。until があるときは maxWait まで待つ
+    timer = setTimeout(onSkip, Math.max((opts.duration + 1.4) * 1000, opts.until ? opts.maxWait : 0));
     current = { end: end };
   }
 
   function skip() { if (current) current.end(false); }
 
-  global.KrasisSplash = { play: play, skip: skip, version: '1.0.0' };
+  global.KrasisSplash = { play: play, skip: skip, version: '1.1.0' };
 })(typeof window !== 'undefined' ? window : this);
