@@ -17,8 +17,10 @@
   var root = document.getElementById('root');
   if (!splash || !root) return;
 
-  // 部品が読み込めなかった場合は、HTMLに置いた黒い枠が残り続けないよう即座に閉じる
-  if (!window.KrasisSplash) {
+  // デスクトップ版(Windows/Mac)は、本体の読み込み中に desktop/splash/ で同じ演出を出し終えている。
+  // 二重に流さないよう、デスクトップのウィンドウ内では何もせずに閉じる(印は desktop/main.cjs が付ける)。
+  // 部品が読み込めなかった場合も、HTMLに置いた黒い枠が残り続けないよう即座に閉じる。
+  if (/THYNORA-Desktop/.test(navigator.userAgent) || !window.KrasisSplash) {
     splash.hidden = true;
     return;
   }

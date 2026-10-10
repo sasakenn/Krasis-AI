@@ -23,7 +23,8 @@
     },
     "files": [
       "main.cjs",
-      "config.example.json"
+      "config.example.json",
+      "splash/**"
     ],
     "extraResources": [
       {

@@ -106,3 +106,11 @@ CapacitorのWebView内でも同じ方式で動作しますが、ネイティブ�
 - ⬜ 署名・リリースビルド(Android: キーストア作成、iOS: Developerアカウントが必要)
 - ⬜ 実機での動作確認
 - ⬜ ストアアカウント登録・審査提出
+
+## 起動画面
+
+- **ネイティブの起動画面**：暗い背景（#08090b）の中央に、ニューロンマークとうっすらしたネットワークを置いた静止画。
+  - Android：`res/drawable*/splash.png` と、Android 12 以降用の `values/splash.xml`・`drawable/splash_mark.xml`
+  - iOS：`Assets.xcassets/Splash.imageset` と `LaunchScreen.storyboard` の背景色
+- **WebView の背景色**：`capacitor.config.json` の `backgroundColor` で同じ色にしている。読み込み中に白い画面が挟まらない。
+- **その後の流れ**：Web 版が読み込まれると、ニューラルネットワークの起動演出（`frontend/public/krasis-splash.js`）が再生される。
