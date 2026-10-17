@@ -37,6 +37,29 @@ Capacitorでラップし、iOS/Androidアプリとして配布するための設
   - Simulator向けビルド:
     `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build`
 
+## Androidのリリース署名
+
+署名用のキーストアは**自分で作り、パスワードとともに安全な場所へバックアップする**(紛失するとGoogle Play上のアプリを更新できなくなる)。リポジトリには入れない。
+
+```bash
+# 1. キーストアを作成(パスワードは対話入力。~/keystores などリポジトリ外に保存)
+mkdir -p ~/keystores
+keytool -genkeypair -v -keystore ~/keystores/thynora-release.jks \
+  -alias thynora -keyalg RSA -keysize 2048 -validity 10000
+
+# 2. 署名設定を用意(keystore.properties はgit管理外)
+cd mobile/android
+cp keystore.properties.example keystore.properties
+#    storeFile / storePassword / keyAlias / keyPassword を編集
+
+# 3. 署名済みのリリースビルド
+./gradlew assembleRelease   # APK: app/build/outputs/apk/release/app-release.apk
+./gradlew bundleRelease     # AAB: app/build/outputs/bundle/release/app-release.aab (Google Play用)
+```
+
+`keystore.properties`が無い場合は未署名でビルドされる(`app-release-unsigned.apk`)。
+Google Playへ出す場合はAABを使い、Play App Signingの利用を推奨する。
+
 ## セットアップ手順(このリポジトリを開発機で作業する人向け)
 
 ```bash

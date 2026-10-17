@@ -26,7 +26,8 @@
 - [ ] Windows on ARM の需要を確認
 
 ## Android
-- [ ] 署名用キーストアを作成し、バックアップする（紛失すると更新できない）
+- [x] 署名設定の仕組みを用意（`keystore.properties` があれば自動署名。手順は `mobile/README.md`）
+- [ ] **署名用キーストアを自分で作成し、バックアップする（紛失すると更新できない）**
 - [ ] 署名設定を入れて `assembleRelease`（APK）／`bundleRelease`（AAB）を作る
 - [ ] Google Play の登録と公開（個人か法人かの判断が先）
 
