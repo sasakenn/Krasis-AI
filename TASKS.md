@@ -1,10 +1,10 @@
 # THYNORA 配布アプリ 残りのタスク
 
-最終更新: 2026-10-10 / Apple 版（iOS・macOS）は保留中
+最終更新: 2026-10-17 / Apple 版（iOS・macOS）は保留中
 
 ## 現状の成果物（すべて未署名）
 - Android: `mobile/android/app/build/outputs/apk/debug/app-debug.apk`（エミュレータで起動確認済み）
-- Windows: `desktop/release/Paper Assistant Setup 1.0.0.exe`（x64、Windows 機での起動は未確認）
+- Windows: `desktop/release/Paper Assistant Setup 1.0.0.exe`（x64、未署名。Windows 機でインストール・起動・ログインまで確認済み）
 - macOS: `desktop/release/Paper Assistant-1.0.0-arm64.dmg`（保留。古いアイコンのまま）
 - iOS: `mobile/ios/` にプロジェクト生成済み（保留。Simulator では起動確認済み）
 
@@ -17,9 +17,10 @@
 - [x] Microsoft ログインの有効化（Azure のマルチテナント化とリダイレクト URI の登録、Render の環境変数）
 - [x] ログイン失敗時のエラー表示、Microsoft の戻り先 URI の正規化
 - [x] Google ログインのボタンが消える不具合を修正（公開サイトで確認済み）
+- [x] Windows 版 EXE の動作確認（インストール・起動・ログイン）
 
 ## Windows
-- [ ] **Windows 機で EXE のインストールと起動を確認する（最優先）**
+- [x] Windows 機で EXE のインストール・起動・ログインを確認
 - [ ] 法人化の判断後、OV コードサイニング証明書を購入
 - [ ] 証明書の受け取り方（USB トークン／クラウド署名）に合わせて署名設定
 - [ ] Windows on ARM の需要を確認
