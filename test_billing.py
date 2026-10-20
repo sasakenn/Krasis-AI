@@ -203,3 +203,52 @@ def test_billing_webhook_subscription_deleted_resets_to_free(monkeypatch):
 
     assert resp.status_code == 200
     assert db.get_or_create_entitlement("cancelling-user")["plan"] == "free"
+
+
+# --- DELETE /me (アカウント削除) ---
+
+
+def test_delete_me_requires_auth():
+    resp = client.delete("/me", headers={"X-Dev-User-Id": ""})
+    assert resp.status_code == 401
+
+
+def test_delete_me_removes_user_data():
+    user_id = "dev:delete-me-user"
+    db.upsert_user(user_id, "delete@example.com")
+    db.get_or_create_entitlement(user_id)
+    resp = client.delete("/me", headers={"X-Dev-User-Id": user_id})
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": True}
+    assert db.get_user_email(user_id) is None
+    with db._connect() as conn:
+        assert conn.execute("SELECT 1 FROM entitlements WHERE user_id = ?", (user_id,)).fetchone() is None
+
+
+def test_delete_me_cancels_stripe_subscriptions_first(monkeypatch):
+    _configure_stripe(monkeypatch)
+    user_id = "dev:delete-me-paid"
+    db.upsert_user(user_id, None)
+    db.get_or_create_entitlement(user_id)
+    db.set_stripe_customer(user_id, "cus_fake")
+    sub = MagicMock(id="sub_1")
+    listing = MagicMock()
+    listing.auto_paging_iter.return_value = [sub]
+    with patch.object(app_module.stripe.Subscription, "list", return_value=listing), patch.object(
+        app_module.stripe.Subscription, "cancel"
+    ) as cancel:
+        resp = client.delete("/me", headers={"X-Dev-User-Id": user_id})
+    assert resp.status_code == 200
+    cancel.assert_called_with("sub_1")
+
+
+def test_delete_me_keeps_data_when_stripe_cancel_fails(monkeypatch):
+    _configure_stripe(monkeypatch)
+    user_id = "dev:delete-me-stripe-fail"
+    db.upsert_user(user_id, "keep@example.com")
+    db.get_or_create_entitlement(user_id)
+    db.set_stripe_customer(user_id, "cus_fake")
+    with patch.object(app_module.stripe.Subscription, "list", side_effect=stripe.error.APIError("boom")):
+        resp = client.delete("/me", headers={"X-Dev-User-Id": user_id})
+    assert resp.status_code == 502
+    assert db.get_user_email(user_id) == "keep@example.com"

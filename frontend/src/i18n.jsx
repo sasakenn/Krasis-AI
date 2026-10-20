@@ -313,6 +313,18 @@ const translations = {
     mfaTitle: { ja: '多要素認証(認証アプリ)', en: 'Multi-factor authentication (authenticator app)', ko: '다단계 인증(인증 앱)' },
     mfaOn: { ja: '✓ 有効になっています', en: '✓ Enabled', ko: '✓ 활성화되어 있습니다' },
     mfaDisablePlaceholder: { ja: '無効にするには現在の6桁コード', en: 'Enter the current 6-digit code to disable', ko: '비활성화하려면 현재 6자리 코드' },
+    deleteTitle: { ja: 'アカウントの削除', en: 'Delete account', ko: '계정 삭제' },
+    deleteHint: {
+      ja: 'アカウントと、生成履歴・セッション・タスクなど全てのデータを完全に削除します。有料プランに加入している場合は先に解約されます。この操作は取り消せません。',
+      en: 'Permanently deletes your account and all data, including history, sessions and tasks. Any paid subscription is cancelled first. This cannot be undone.',
+      ko: '계정과 생성 기록, 세션, 작업 등 모든 데이터를 영구적으로 삭제합니다. 유료 플랜이 있으면 먼저 해지됩니다. 이 작업은 되돌릴 수 없습니다.',
+    },
+    deleteSubmit: { ja: 'アカウントを削除する', en: 'Delete my account', ko: '계정 삭제하기' },
+    deleteConfirm: {
+      ja: 'アカウントと全てのデータを完全に削除します。この操作は取り消せません。よろしいですか?',
+      en: 'This permanently deletes your account and all data. This cannot be undone. Continue?',
+      ko: '계정과 모든 데이터를 영구적으로 삭제합니다. 되돌릴 수 없습니다. 계속하시겠습니까?',
+    },
     mfaDisableSubmit: { ja: '多要素認証を無効にする', en: 'Disable multi-factor authentication', ko: '다단계 인증 비활성화' },
     mfaPending: { ja: '設定途中です。もう一度シークレットを発行してください。', en: 'Setup is incomplete. Please generate a new secret.', ko: '설정이 진행 중입니다. 시크릿을 다시 발급해 주세요.' },
     mfaOff: { ja: '現在、無効です。', en: 'Currently disabled.', ko: '현재 비활성화되어 있습니다.' },

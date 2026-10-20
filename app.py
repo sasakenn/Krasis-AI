@@ -56,6 +56,7 @@ from db import (
     delete_generation,
     delete_history_entry,
     delete_mfa,
+    delete_user_account,
     delete_session,
     delete_task,
     enable_mfa,
@@ -1958,6 +1959,29 @@ def me(user_id: str = Depends(get_current_user)):
     entitlement = get_or_create_entitlement(user_id)
     quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
     return {**entitlement, "tokens_quota": quota, "is_admin": _is_admin(user_id)}
+
+
+@app.delete("/me")
+def delete_me(user_id: str = Depends(get_current_user)):
+    """アカウントと関連データを完全に削除する(アプリストアのアカウント削除要件)。
+
+    有料契約があれば先にStripeで解約する。解約に失敗した場合はデータを消さず502を返す
+    (契約だけ残って課金され続ける状態を避けるため)。削除後はこのユーザーのトークンは使えない。
+    """
+    entitlement = get_or_create_entitlement(user_id)
+    customer_id = entitlement.get("stripe_customer_id")
+    if customer_id and stripe.api_key:
+        try:
+            for status in ("active", "trialing", "past_due", "unpaid"):
+                subscriptions = stripe.Subscription.list(customer=customer_id, status=status, limit=100)
+                for subscription in subscriptions.auto_paging_iter():
+                    stripe.Subscription.cancel(subscription.id)
+        except stripe.error.StripeError as exc:
+            raise HTTPException(status_code=502, detail=f"契約の解約に失敗したため、アカウントを削除できませんでした: {exc}") from exc
+
+    delete_user_account(user_id)
+    record_security_event("account_deleted", user_id)
+    return {"deleted": True}
 
 
 @app.get("/admin/overview")

@@ -2875,6 +2875,7 @@ function SecuritySettings({ onClose, onTokenRefresh }) {
   const [events, setEvents] = useState([])
   const [loading, setLoading] = useState(false)
   const [logoutAllLoading, setLogoutAllLoading] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
   const [error, setError] = useState(null)
   const [message, setMessage] = useState(null)
 
@@ -2939,6 +2940,22 @@ function SecuritySettings({ onClose, onTokenRefresh }) {
       setError(String(err))
     } finally {
       setLoading(false)
+    }
+  }
+
+  // アカウントと全データの完全削除(アプリストアのアカウント削除要件)。取り消せないので確認を挟む。
+  async function handleDeleteAccount() {
+    if (!window.confirm(t('security.deleteConfirm'))) return
+    setError(null)
+    setMessage(null)
+    setDeleteLoading(true)
+    try {
+      const resp = await apiFetch('/me', { method: 'DELETE' })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      onTokenRefresh?.(null)
+    } catch (err) {
+      setError(String(err))
+      setDeleteLoading(false)
     }
   }
 
@@ -3058,6 +3075,19 @@ function SecuritySettings({ onClose, onTokenRefresh }) {
           disabled={logoutAllLoading}
         >
           {logoutAllLoading ? t('common.loadingEllipsis') : t('security.logoutAllSubmit')}
+        </button>
+      </section>
+
+      <section className="security-panel-section">
+        <h4>{t('security.deleteTitle')}</h4>
+        <p className="security-panel-hint">{t('security.deleteHint')}</p>
+        <button
+          type="button"
+          className="upgrade-button"
+          onClick={handleDeleteAccount}
+          disabled={deleteLoading}
+        >
+          {deleteLoading ? t('common.loadingEllipsis') : t('security.deleteSubmit')}
         </button>
       </section>
 

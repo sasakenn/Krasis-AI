@@ -809,6 +809,32 @@ def delete_mfa(user_id: str) -> bool:
         return cursor.rowcount > 0
 
 
+# ユーザーのデータを持つテーブル(user_id列)。アカウント削除時に全て消す。
+# security_eventsはsubjectがプロバイダー名等で個人に紐づかない監査ログなので対象外。
+_USER_DATA_TABLES = (
+    "generations",
+    "history_entries",
+    "sessions",
+    "entitlements",
+    "code_logins",
+    "mfa_enrollments",
+    "activity_pings",
+    "tasks",
+    "ai_agents_subscriptions",
+)
+
+
+def delete_user_account(user_id: str) -> None:
+    """ユーザー本人のデータ(生成履歴・セッション・タスク・契約情報・ユーザー行)を全て削除する。
+
+    1つのトランザクションで行い、途中で失敗した場合は何も消えない。
+    """
+    with _connect() as conn:
+        for table in _USER_DATA_TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+
 def record_security_event(
     event_type: str,
     subject: str,
