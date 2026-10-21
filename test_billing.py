@@ -252,3 +252,77 @@ def test_delete_me_keeps_data_when_stripe_cancel_fails(monkeypatch):
         resp = client.delete("/me", headers={"X-Dev-User-Id": user_id})
     assert resp.status_code == 502
     assert db.get_user_email(user_id) == "keep@example.com"
+
+
+# --- /billing/revenuecat/webhook (Apple アプリ内課金) ---
+
+RC_AUTH = "rc-test-secret"
+
+
+def _rc_event(event_type, user_id, product_id="com.thynora.app.pro.monthly"):
+    return {"event": {"type": event_type, "app_user_id": user_id, "product_id": product_id}}
+
+
+def _post_rc(monkeypatch, payload, auth=RC_AUTH):
+    monkeypatch.setattr(app_module, "REVENUECAT_WEBHOOK_AUTH", RC_AUTH)
+    return client.post("/billing/revenuecat/webhook", json=payload, headers={"Authorization": auth})
+
+
+def test_revenuecat_webhook_returns_503_when_not_configured(monkeypatch):
+    monkeypatch.setattr(app_module, "REVENUECAT_WEBHOOK_AUTH", "")
+    resp = client.post("/billing/revenuecat/webhook", json=_rc_event("INITIAL_PURCHASE", "x"))
+    assert resp.status_code == 503
+
+
+def test_revenuecat_webhook_rejects_wrong_authorization(monkeypatch):
+    resp = _post_rc(monkeypatch, _rc_event("INITIAL_PURCHASE", "x"), auth="wrong")
+    assert resp.status_code == 401
+
+
+def test_revenuecat_webhook_rejects_malformed_payload(monkeypatch):
+    resp = _post_rc(monkeypatch, {"nope": 1})
+    assert resp.status_code == 400
+
+
+def test_revenuecat_webhook_ignores_unknown_user(monkeypatch):
+    resp = _post_rc(monkeypatch, _rc_event("INITIAL_PURCHASE", "apple:does-not-exist"))
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ignored"}
+
+
+def test_revenuecat_purchase_grants_plan_and_expiration_reverts_it(monkeypatch):
+    user_id = "dev:rc-user"
+    db.upsert_user(user_id, None)
+    assert _post_rc(monkeypatch, _rc_event("INITIAL_PURCHASE", user_id)).status_code == 200
+    ent = db.get_or_create_entitlement(user_id)
+    assert (ent["plan"], ent["plan_source"]) == ("pro", "apple")
+
+    _post_rc(monkeypatch, _rc_event("PRODUCT_CHANGE", user_id, "com.thynora.app.max.monthly"))
+    assert db.get_or_create_entitlement(user_id)["plan"] == "max"
+
+    _post_rc(monkeypatch, _rc_event("CANCELLATION", user_id))
+    assert db.get_or_create_entitlement(user_id)["plan"] == "max"  # 期間終了までは有効
+
+    _post_rc(monkeypatch, _rc_event("EXPIRATION", user_id))
+    assert db.get_or_create_entitlement(user_id)["plan"] == "free"
+
+
+def test_revenuecat_expiration_does_not_touch_stripe_plan(monkeypatch):
+    user_id = "dev:rc-stripe-user"
+    db.upsert_user(user_id, None)
+    db.set_plan(user_id, "pro", "stripe")
+    _post_rc(monkeypatch, _rc_event("EXPIRATION", user_id))
+    assert db.get_or_create_entitlement(user_id)["plan"] == "pro"
+
+
+def test_stripe_cancellation_does_not_revert_apple_plan(monkeypatch):
+    _configure_stripe(monkeypatch)
+    user_id = "dev:apple-and-stripe"
+    db.upsert_user(user_id, None)
+    db.set_stripe_customer(user_id, "cus_apple_mix")
+    db.set_plan(user_id, "pro", "apple")
+    event = {"type": "customer.subscription.deleted", "data": {"object": {"customer": "cus_apple_mix"}}}
+    with patch.object(app_module.stripe.Webhook, "construct_event", return_value=event):
+        resp = client.post("/billing/webhook", content=b"{}", headers={"stripe-signature": "t"})
+    assert resp.status_code == 200
+    assert db.get_or_create_entitlement(user_id)["plan"] == "pro"

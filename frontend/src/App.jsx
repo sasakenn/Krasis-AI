@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
 import itoMascot from './assets/ito-mascot.png'
+import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, purchasePlan, restorePurchases } from './iap'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
 // アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
@@ -3791,10 +3792,15 @@ export default function App() {
   const fetchUsage = useCallback(async () => {
     try {
       const resp = await apiFetch('/me')
-      if (resp.ok) setUsage(await resp.json())
+      if (resp.ok) {
+        const data = await resp.json()
+        setUsage(data)
+        return data
+      }
     } catch {
       // 使用量表示の取得に失敗しても致命的ではないので黙って諦める
     }
+    return null
   }, [])
 
   useEffect(() => {
@@ -3823,7 +3829,43 @@ export default function App() {
 
   const [billingLoading, setBillingLoading] = useState(false)
 
+  // iOSアプリ内ではStripeではなくAppleのアプリ内課金で購入する(購入後はWebhookでプランが
+  // 更新されるため、反映されるまで少し待ってから利用状況を取り直す)。
+  async function refreshUsageUntilPaid() {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const data = await fetchUsage()
+      if (data && data.plan !== 'free') return
+    }
+  }
+
+  async function handleIosPurchase(plan) {
+    setSidebarError(null)
+    setBillingLoading(true)
+    try {
+      if (await purchasePlan(plan, usage?.user_id)) await refreshUsageUntilPaid()
+    } catch (err) {
+      setSidebarError(`${t('errors.upgradeFailed')}: ${String(err?.message || err)}`)
+    } finally {
+      setBillingLoading(false)
+    }
+  }
+
+  async function handleRestorePurchases() {
+    setSidebarError(null)
+    setBillingLoading(true)
+    try {
+      await restorePurchases(usage?.user_id)
+      await refreshUsageUntilPaid()
+    } catch (err) {
+      setSidebarError(`${t('errors.upgradeFailed')}: ${String(err?.message || err)}`)
+    } finally {
+      setBillingLoading(false)
+    }
+  }
+
   async function handleUpgrade(plan) {
+    if (isIosNativeApp()) return handleIosPurchase(plan)
     setSidebarError(null)
     setBillingLoading(true)
     try {
@@ -3842,6 +3884,11 @@ export default function App() {
   }
 
   async function handleManageBilling() {
+    // Appleで契約したプランの解約・変更はiOSの設定(サブスクリプション)で行う
+    if (isIosNativeApp() || usage?.plan_source === 'apple') {
+      window.location.href = SUBSCRIPTIONS_URL
+      return
+    }
     setSidebarError(null)
     setBillingLoading(true)
     try {
@@ -4501,6 +4548,16 @@ export default function App() {
                 >
                   {t('sidebar.upgradeMax')}
                 </button>
+                {isIapAvailable() && (
+                  <button
+                    type="button"
+                    className="upgrade-button"
+                    disabled={billingLoading}
+                    onClick={handleRestorePurchases}
+                  >
+                    {t('sidebar.restorePurchases')}
+                  </button>
+                )}
               </div>
             ) : (
               usage && (

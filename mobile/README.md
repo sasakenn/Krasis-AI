@@ -37,6 +37,31 @@ Capacitorでラップし、iOS/Androidアプリとして配布するための設
   - Simulator向けビルド:
     `xcodebuild -workspace ios/App/App.xcworkspace -scheme App -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build`
 
+## iOSのアプリ内課金(Apple / RevenueCat)
+
+アプリストアの規約上、iOSアプリ内でサブスクを売る場合はStripeではなくAppleのアプリ内課金を使う。
+このリポジトリでは、RevenueCat(`@revenuecat/purchases-capacitor`)で購入・復元を行い、
+RevenueCatのWebhookをサーバー(`POST /billing/revenuecat/webhook`)が受けてプランを更新する。
+Web版・デスクトップ版は従来どおりStripe。iOSアプリ内のみ、購入ボタンがアプリ内課金に切り替わる
+(`frontend/src/iap.js`)。公開SDKキーが未設定の間は、購入ボタンは表示されるが購入に失敗する。
+
+事前準備(Apple Developer ProgramとRevenueCatのアカウントが必要。コードだけでは完結しない):
+
+1. App Store Connectで、自動更新サブスクリプションを2つ作る。商品IDは
+   `com.thynora.app.pro.monthly`(Pro)と`com.thynora.app.max.monthly`(Max)。
+   別のIDにする場合はサーバーの環境変数`REVENUECAT_PRODUCT_PLANS`(`商品ID:プラン,...`)で対応づける。
+2. RevenueCatでプロジェクトを作り、iOSアプリ(Bundle ID `com.thynora.app`)を登録して商品を取り込む。
+   Offeringの`current`に、パッケージ識別子`$rc_pro`と`$rc_max`でそれぞれの商品を入れる。
+3. RevenueCatのWebhookに`https://app.krasis.xyz/billing/revenuecat/webhook`を登録し、
+   Authorizationヘッダーに任意の長い秘密値を設定する。同じ値をRenderの`REVENUECAT_WEBHOOK_AUTH`に入れる。
+4. RevenueCatのiOS用公開SDKキー(`appl_`で始まる)をRenderの`VITE_REVENUECAT_IOS_API_KEY`に入れて再デプロイする。
+5. Xcodeの Signing & Capabilities で In-App Purchase を有効にする(Developerアカウントでの署名が必要)。
+6. サンドボックスのテスターで、購入・復元・更新・解約・期限切れを確認する。
+
+購入時のRevenueCat側のユーザーIDはこのアプリのuser_id(`/me`の`user_id`)を使う。
+Apple経由のプランは、StripeのWebhookでは解約扱いにならず、Apple側の失効(EXPIRATION)でのみfreeへ戻る。
+Appleで契約中のユーザーの解約・変更は、iOSの設定(サブスクリプション)で行う。
+
 ## Androidのリリース署名
 
 署名用のキーストアは**自分で作り、パスワードとともに安全な場所へバックアップする**(紛失するとGoogle Play上のアプリを更新できなくなる)。リポジトリには入れない。

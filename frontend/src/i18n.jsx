@@ -130,6 +130,7 @@ const translations = {
     tokensThisMonth: { ja: 'TOKENS · 今月', en: 'TOKENS · this month', ko: 'TOKENS · 이번 달' },
     upgradePro: { ja: 'Proにアップグレード', en: 'Upgrade to Pro', ko: 'Pro로 업그레이드' },
     upgradeMax: { ja: 'Maxにアップグレード', en: 'Upgrade to Max', ko: 'Max로 업그레이드' },
+    restorePurchases: { ja: '購入を復元', en: 'Restore purchases', ko: '구매 복원' },
     managePlan: { ja: '解約・プラン管理', en: 'Cancel or manage plan', ko: '해지 및 플랜 관리' },
     adminDashboard: { ja: '管理ダッシュボード', en: 'Admin dashboard', ko: '관리 대시보드' },
     securitySettings: { ja: 'セキュリティ設定', en: 'Security settings', ko: '보안 설정' },

@@ -31,6 +31,14 @@
 - [ ] 署名設定を入れて `assembleRelease`（APK）／`bundleRelease`（AAB）を作る
 - [ ] Google Play の登録と公開（個人か法人かの判断が先）
 
+## iOS アプリ内課金（コードは実装済み。アカウントと商品登録が必要）
+- [x] サーバー: RevenueCat Webhook（`/billing/revenuecat/webhook`）、プランの出どころ管理（Stripe/Apple）
+- [x] 画面: iOS アプリ内で購入・復元・サブスク管理（`frontend/src/iap.js`）
+- [x] アカウント削除機能（`DELETE /me`）
+- [ ] RevenueCat のアカウント作成、商品・Offering の登録、Render の環境変数設定（手順は `mobile/README.md`）
+- [ ] サンドボックスで購入・復元・失効のテスト（Apple Developer アカウントが必要）
+- [ ] Sign in with Apple のボタン、プライバシーポリシーのページ、`PrivacyInfo.xcprivacy`
+
 ## Apple 版（保留）
 - [ ] Apple Developer Program の登録（個人か組織か）
 - [ ] iOS: 署名、実機テスト、TestFlight、App Store 提出

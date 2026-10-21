@@ -94,6 +94,7 @@ from db import (
     set_history_entry_privacy,
     set_mfa_secret,
     set_plan,
+    user_exists,
     set_stripe_customer,
     set_task_status,
     update_code_login_hash,
@@ -2164,12 +2165,75 @@ async def billing_webhook(request: Request):
         user_id = get_user_id_by_stripe_customer(customer_id) if customer_id else None
         # サブスクが有効なステータスでなければ(未払い等)課金プランとして扱わない
         if user_id and plan and data.get("status") in ("active", "trialing"):
-            set_plan(user_id, plan)
+            set_plan(user_id, plan, "stripe")
 
     elif event_type == "customer.subscription.deleted":
         customer_id = data.get("customer")
         user_id = get_user_id_by_stripe_customer(customer_id) if customer_id else None
-        if user_id:
+        # Apple(アプリ内課金)で契約中のユーザーは、Stripe側の解約でfreeに戻さない
+        if user_id and get_or_create_entitlement(user_id).get("plan_source") != "apple":
+            set_plan(user_id, "free")
+
+    return {"status": "ok"}
+
+
+# --- Apple アプリ内課金(RevenueCat経由) ---
+# iOSアプリ内のサブスク購入はAppleのアプリ内課金で行い(Stripeの決済ページへは誘導しない)、
+# RevenueCatがレシートを検証してこのWebhookに通知する。app_user_idにはこのアプリのuser_idを使う。
+REVENUECAT_WEBHOOK_AUTH = os.getenv("REVENUECAT_WEBHOOK_AUTH", "").strip()
+# App Store Connectで作る商品ID→プラン。環境変数で上書きできる(形式: 商品ID:プラン,商品ID:プラン)。
+_DEFAULT_REVENUECAT_PRODUCT_PLANS = {
+    "com.thynora.app.pro.monthly": "pro",
+    "com.thynora.app.max.monthly": "max",
+}
+
+
+def _load_revenuecat_product_plans() -> Dict[str, str]:
+    raw = os.getenv("REVENUECAT_PRODUCT_PLANS", "").strip()
+    if not raw:
+        return dict(_DEFAULT_REVENUECAT_PRODUCT_PLANS)
+    mapping = {}
+    for pair in raw.split(","):
+        product_id, _, plan = pair.partition(":")
+        if product_id.strip() and plan.strip() in PLAN_TOKEN_QUOTAS:
+            mapping[product_id.strip()] = plan.strip()
+    return mapping
+
+
+REVENUECAT_PRODUCT_PLANS = _load_revenuecat_product_plans()
+_REVENUECAT_GRANT_EVENTS = {"INITIAL_PURCHASE", "RENEWAL", "PRODUCT_CHANGE", "UNCANCELLATION", "NON_RENEWING_PURCHASE"}
+
+
+@app.post("/billing/revenuecat/webhook")
+async def revenuecat_webhook(request: Request):
+    """RevenueCatからの購入・更新・失効の通知を受け取り、プランをentitlementsに反映する。
+
+    認証はRevenueCatのWebhook設定で指定するAuthorizationヘッダー値(REVENUECAT_WEBHOOK_AUTH)で行う。
+    """
+    if not REVENUECAT_WEBHOOK_AUTH:
+        raise HTTPException(status_code=503, detail="Webhookはまだ設定されていません(REVENUECAT_WEBHOOK_AUTH未設定)")
+    if not hmac.compare_digest(request.headers.get("authorization", ""), REVENUECAT_WEBHOOK_AUTH):
+        raise HTTPException(status_code=401, detail="invalid webhook authorization")
+
+    try:
+        body = await request.json()
+        event = body["event"]
+        event_type = event["type"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise HTTPException(status_code=400, detail="invalid webhook payload") from exc
+
+    user_id = event.get("app_user_id")
+    if not user_id or not user_exists(user_id):
+        # 未知のユーザー(匿名IDなど)は無視する。再送を止めるため200で返す。
+        return {"status": "ignored"}
+
+    if event_type in _REVENUECAT_GRANT_EVENTS:
+        plan = REVENUECAT_PRODUCT_PLANS.get(event.get("product_id"))
+        if plan:
+            set_plan(user_id, plan, "apple")
+    elif event_type == "EXPIRATION":
+        # Appleでの契約が切れた時だけfreeに戻す(Stripe契約を巻き込まない)
+        if get_or_create_entitlement(user_id).get("plan_source") == "apple":
             set_plan(user_id, "free")
 
     return {"status": "ok"}

@@ -40,6 +40,12 @@ services:
         sync: false
       - key: GITHUB_CLIENT_SECRET
         sync: false
+      # iOSアプリ内課金(RevenueCat)。Webhookの認証値(RevenueCatのWebhook設定のAuthorizationヘッダーと同じ値)と、
+      # App Store Connectの商品ID→プランの対応(例: com.thynora.app.pro.monthly:pro,com.thynora.app.max.monthly:max)。
+      - key: REVENUECAT_WEBHOOK_AUTH
+        sync: false
+      - key: REVENUECAT_PRODUCT_PLANS
+        sync: false
       - key: MICROSOFT_CLIENT_ID
         sync: false
       - key: MICROSOFT_CLIENT_SECRET
@@ -51,6 +57,9 @@ services:
       - key: VITE_GOOGLE_CLIENT_ID
         sync: false
       - key: VITE_GITHUB_CLIENT_ID
+        sync: false
+      # RevenueCatのiOS用公開SDKキー(appl_で始まる値。公開前提のキー)
+      - key: VITE_REVENUECAT_IOS_API_KEY
         sync: false
       - key: VITE_MICROSOFT_CLIENT_ID
         sync: false

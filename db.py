@@ -184,6 +184,9 @@ def init_db() -> None:
         _ensure_column(conn, "sessions", "user_id", "TEXT", backfill=LEGACY_USER_ID)
         _ensure_column(conn, "generations", "is_private", "INTEGER", backfill=0)
         _ensure_column(conn, "entitlements", "stripe_customer_id", "TEXT")
+        # プランの出どころ('stripe' / 'apple')。AppleとStripeのイベントが互いの契約を
+        # 上書きして解約扱いにしないよう、失効イベントは出どころが一致する時だけ反映する。
+        _ensure_column(conn, "entitlements", "plan_source", "TEXT")
         _ensure_column(conn, "security_events", "ip_address", "TEXT")
         _ensure_column(conn, "security_events", "user_agent", "TEXT")
         # セッションJWTの一括失効(ログアウト、MFA有効化/無効化)用のバージョン番号。
@@ -215,6 +218,11 @@ def upsert_user(user_id: str, email: str | None) -> None:
             # 各プロバイダーがメールアドレスを返すのは初回サインイン時のみのことが多いので、
             # 渡ってきた場合だけ上書きする(以降のサインインでNoneに戻さないため)。
             conn.execute("UPDATE users SET email = ? WHERE id = ?", (email, user_id))
+
+
+def user_exists(user_id: str) -> bool:
+    with _connect() as conn:
+        return conn.execute("SELECT 1 FROM users WHERE id = ?", (user_id,)).fetchone() is not None
 
 
 def get_user_email(user_id: str) -> str | None:
@@ -515,7 +523,7 @@ def get_or_create_entitlement(user_id: str) -> dict:
     now = datetime.now(timezone.utc)
     with _connect() as conn:
         row = conn.execute(
-            "SELECT user_id, plan, tokens_used, period_start, stripe_customer_id FROM entitlements WHERE user_id = ?",
+            "SELECT user_id, plan, tokens_used, period_start, stripe_customer_id, plan_source FROM entitlements WHERE user_id = ?",
             (user_id,),
         ).fetchone()
 
@@ -531,6 +539,7 @@ def get_or_create_entitlement(user_id: str) -> dict:
                 "tokens_used": 0,
                 "period_start": now_iso,
                 "stripe_customer_id": None,
+                "plan_source": None,
             }
 
         entitlement = dict(row)
@@ -556,11 +565,17 @@ def add_token_usage(user_id: str, tokens: int) -> dict:
     return entitlement
 
 
-def set_plan(user_id: str, plan: str) -> None:
-    """プランを変更する。Stripe Webhookや手動操作から呼ばれる。"""
+def set_plan(user_id: str, plan: str, source: str | None = None) -> None:
+    """プランを変更する。Stripe/RevenueCat(Apple)のWebhookや手動操作から呼ばれる。
+
+    sourceは課金元('stripe'/'apple')。freeに戻す時は課金元を空にする。
+    """
     get_or_create_entitlement(user_id)
     with _connect() as conn:
-        conn.execute("UPDATE entitlements SET plan = ? WHERE user_id = ?", (plan, user_id))
+        conn.execute(
+            "UPDATE entitlements SET plan = ?, plan_source = ? WHERE user_id = ?",
+            (plan, None if plan == "free" else source, user_id),
+        )
 
 
 def set_stripe_customer(user_id: str, stripe_customer_id: str) -> None:
