@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
 import itoMascot from './assets/ito-mascot.png'
+import { isAppleSignInAvailable, requestAppleIdentityToken } from './appleSignIn'
 import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, purchasePlan, restorePurchases } from './iap'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
@@ -554,6 +555,28 @@ function LoginScreen({ onToken, initialMfaToken, initialError }) {
     }
   }, [googleClientId, googleReady, onToken])
 
+  async function handleAppleSignIn() {
+    setError(null)
+    try {
+      const identityToken = await requestAppleIdentityToken()
+      if (!identityToken) return
+      const resp = await fetch(`${API_ORIGIN}/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identity_token: identityToken }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      const data = await resp.json()
+      if (data.mfa_required) {
+        setMfaToken(data.mfa_token)
+      } else {
+        onToken(data.token)
+      }
+    } catch (err) {
+      setError(String(err?.message || err))
+    }
+  }
+
   function handleGitHubSignIn() {
     const params = new URLSearchParams({
       client_id: githubClientId,
@@ -644,6 +667,12 @@ function LoginScreen({ onToken, initialMfaToken, initialError }) {
               </button>
               <small className="login-hint">{t('login.googleMissing')}</small>
             </>
+          )}
+
+          {isAppleSignInAvailable() && (
+            <button type="button" className="login-button login-button-apple" onClick={handleAppleSignIn}>
+              {t('login.appleSignIn')}
+            </button>
           )}
 
           <button

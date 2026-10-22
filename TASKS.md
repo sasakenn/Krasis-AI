@@ -37,7 +37,13 @@
 - [x] アカウント削除機能（`DELETE /me`）
 - [ ] RevenueCat のアカウント作成、商品・Offering の登録、Render の環境変数設定（手順は `mobile/README.md`）
 - [ ] サンドボックスで購入・復元・失効のテスト（Apple Developer アカウントが必要）
-- [ ] Sign in with Apple のボタン、プライバシーポリシーのページ、`PrivacyInfo.xcprivacy`
+- [x] Sign in with Apple（iOS アプリ内のボタン、サーバーの複数 audience 対応、entitlements）
+- [x] `PrivacyInfo.xcprivacy`（プライバシー申告ファイル）
+- [x] プライバシーポリシーの下書き（`PRIVACY.md`。角括弧の項目を埋めて公開する）
+- [ ] Apple Developer の承認確認、Team ID を Xcode の署名に設定
+- [ ] App ID（`com.thynora.app`）の登録、Sign in with Apple と In-App Purchase の有効化
+- [ ] App Store Connect でアプリ作成、サブスク 2 つ作成
+- [ ] Render の `APPLE_CLIENT_ID` に `com.thynora.app` を追加（カンマ区切り）
 
 ## Apple 版（保留）
 - [ ] Apple Developer Program の登録（個人か組織か）

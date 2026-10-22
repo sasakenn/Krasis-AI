@@ -70,6 +70,7 @@ const translations = {
     googleSignIn: { ja: 'Googleでサインイン', en: 'Sign in with Google', ko: 'Google로 로그인' },
     githubSignIn: { ja: 'GitHubでサインイン', en: 'Sign in with GitHub', ko: 'GitHub로 로그인' },
     microsoftSignIn: { ja: 'Microsoftでサインイン', en: 'Sign in with Microsoft', ko: 'Microsoft로 로그인' },
+    appleSignIn: { ja: 'Appleでサインイン', en: 'Sign in with Apple', ko: 'Apple로 로그인' },
     googleMissing: { ja: 'サーバーでGOOGLE_CLIENT_IDが未設定です', en: 'GOOGLE_CLIENT_ID is not configured on the server', ko: '서버에 GOOGLE_CLIENT_ID가 설정되어 있지 않습니다' },
     githubMissing: { ja: 'サーバーでGITHUB_CLIENT_IDが未設定です', en: 'GITHUB_CLIENT_ID is not configured on the server', ko: '서버에 GITHUB_CLIENT_ID가 설정되어 있지 않습니다' },
     microsoftMissing: { ja: 'サーバーでMICROSOFT_CLIENT_IDが未設定です', en: 'MICROSOFT_CLIENT_ID is not configured on the server', ko: '서버에 MICROSOFT_CLIENT_ID가 설정되어 있지 않습니다' },

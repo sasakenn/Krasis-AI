@@ -40,6 +40,18 @@ def test_verify_apple_identity_token_accepts_valid_token(monkeypatch, oidc_keypa
     assert claims["email"] == "user@example.com"
 
 
+def test_verify_apple_identity_token_accepts_any_configured_audience(monkeypatch, oidc_keypair):
+    private_key, public_key = oidc_keypair
+    _use_fake_jwks(monkeypatch, public_key)
+    monkeypatch.setattr(auth, "APPLE_CLIENT_ID", "com.example.web, com.example.ios")
+
+    token = sign_oidc_token(private_key, aud="com.example.ios")
+    assert auth.verify_apple_identity_token(token)["sub"] == "apple-user-123"
+
+    with pytest.raises(auth.AuthError):
+        auth.verify_apple_identity_token(sign_oidc_token(private_key, aud="com.example.other"))
+
+
 def test_verify_apple_identity_token_rejects_wrong_audience(monkeypatch, oidc_keypair):
     private_key, public_key = oidc_keypair
     _use_fake_jwks(monkeypatch, public_key)

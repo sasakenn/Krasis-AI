@@ -1,6 +1,8 @@
 PODS:
   - Capacitor (7.6.9):
     - CapacitorCordova
+  - CapacitorCommunityAppleSignIn (7.1.0):
+    - Capacitor
   - CapacitorCordova (7.6.9)
   - PurchasesHybridCommon (17.55.2):
     - RevenueCat (= 5.67.1)
@@ -11,6 +13,7 @@ PODS:
 
 DEPENDENCIES:
   - "Capacitor (from `../../node_modules/@capacitor/ios`)"
+  - "CapacitorCommunityAppleSignIn (from `../../node_modules/@capacitor-community/apple-sign-in`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "RevenuecatPurchasesCapacitor (from `../../node_modules/@revenuecat/purchases-capacitor`)"
 
@@ -22,6 +25,8 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   Capacitor:
     :path: "../../node_modules/@capacitor/ios"
+  CapacitorCommunityAppleSignIn:
+    :path: "../../node_modules/@capacitor-community/apple-sign-in"
   CapacitorCordova:
     :path: "../../node_modules/@capacitor/ios"
   RevenuecatPurchasesCapacitor:
@@ -29,11 +34,12 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Capacitor: 1194c38ae1cc820671aefd94c59ebcbca2f33b26
+  CapacitorCommunityAppleSignIn: 59bc8ade5677e6ea60a14bdca8d3f4bdc91069e2
   CapacitorCordova: 2080fc0d6bfbc9dcc0e6d88e77fa624190d343ca
   PurchasesHybridCommon: 83c0727d99136975a5bcb20854fb65eff9f45d7e
   RevenueCat: 9357239a9f0978285e68983637b8a602e65c94f0
   RevenuecatPurchasesCapacitor: a922e9f7c1a009625b91e99de81f0308efb7c7ef
 
-PODFILE CHECKSUM: a82bbc87868a08444ae433fe0a742992edb639de
+PODFILE CHECKSUM: 5ca3062cb6bfb31216d0bbf61622a219bafd90ae
 
 COCOAPODS: 1.17.0

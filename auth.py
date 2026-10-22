@@ -87,7 +87,7 @@ class AuthError(Exception):
     """ログイン検証 / アプリセッショントークンの検証に失敗したことを表す。"""
 
 
-def _verify_oidc_id_token(token: str, *, issuer, audience: str, jwks_url: str) -> dict:
+def _verify_oidc_id_token(token: str, *, issuer, audience, jwks_url: str) -> dict:
     """OIDCのidentity token(Apple/Google共通の形)を検証し、claimsを返す。
 
     issuer は文字列1つ、または許容する複数issuerのタプルを受け付ける。
@@ -114,11 +114,14 @@ def _verify_oidc_id_token(token: str, *, issuer, audience: str, jwks_url: str) -
 
 def verify_apple_identity_token(identity_token: str) -> dict:
     """Sign in with Apple の identity token を検証し、{"sub", "email"}を返す。"""
-    if not APPLE_CLIENT_ID:
+    # APPLE_CLIENT_IDはカンマ区切りで複数指定できる(iOSアプリのBundle ID、WebのServices IDなど。
+    # トークンのaudはサインインした経路に応じてこれらのどれかになる)。
+    audiences = [value.strip() for value in APPLE_CLIENT_ID.split(",") if value.strip()]
+    if not audiences:
         raise AuthError("APPLE_CLIENT_ID is not configured on the server")
 
     claims = _verify_oidc_id_token(
-        identity_token, issuer=APPLE_ISSUER, audience=APPLE_CLIENT_ID, jwks_url=APPLE_JWKS_URL
+        identity_token, issuer=APPLE_ISSUER, audience=audiences, jwks_url=APPLE_JWKS_URL
     )
     return {"sub": claims["sub"], "email": claims.get("email")}
 

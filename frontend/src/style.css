@@ -2268,3 +2268,6 @@ body {
   .admin-body { padding: 18px 16px 32px; }
   .admin-tabs { padding: 10px 16px 0; }
 }
+
+/* Appleのヒューマンインターフェースガイドラインに沿った黒地・白文字の「Appleでサインイン」ボタン */
+.login-button-apple { background: #000; color: #fff; border-color: #000; }
