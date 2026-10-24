@@ -15,6 +15,15 @@ function getCapacitor() {
   return typeof window === 'undefined' ? undefined : window.Capacitor
 }
 
+// iOS/Androidのネイティブアプリ(Capacitor)内かどうか
+export function isNativeApp() {
+  try {
+    return Boolean(getCapacitor()?.isNativePlatform?.())
+  } catch {
+    return false
+  }
+}
+
 export function isIosNativeApp() {
   const cap = getCapacitor()
   try {

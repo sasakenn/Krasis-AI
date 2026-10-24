@@ -20,7 +20,7 @@ import {
 import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
 import itoMascot from './assets/ito-mascot.png'
 import { isAppleSignInAvailable, requestAppleIdentityToken } from './appleSignIn'
-import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, purchasePlan, restorePurchases } from './iap'
+import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, isNativeApp, purchasePlan, restorePurchases } from './iap'
 
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
 // アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
@@ -658,7 +658,9 @@ function LoginScreen({ onToken, initialMfaToken, initialError }) {
         <p className="login-subtitle">{t('login.subtitle')}</p>
 
         <div className="login-options">
-          {googleClientId ? (
+          {/* Googleはアプリ内の画面(WebView)でのログインを許可していない(白い画面で止まる)ため、
+              ネイティブアプリでは出さない。Web版・デスクトップ版でのみ表示する。 */}
+          {isNativeApp() ? null : googleClientId ? (
             <div id="google-signin-button" className="login-google-button" />
           ) : (
             <>
