@@ -1,6 +1,6 @@
 require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
 
-platform :ios, '14.0'
+platform :ios, '15.0'
 use_frameworks!
 
 # workaround to avoid Xcode caching of Pods that requires
@@ -21,5 +21,26 @@ target 'App' do
 end
 
 post_install do |installer|
+  # 最新のXcodeはiOS 15未満をサポートしないため、各Podのpodspecが指定する古い値(14.0)も15.0に揃える
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+    end
+  end
+  # Xcode 27のSwiftは、デフォルト値付きの保存プロパティを持つ構造体に「引数を省略した版」のmemberwise initも
+  # 自動生成するようになり、RevenueCat 5.67.1のPaywallColor.swiftの公開init(stringRepresentation:)と
+  # 衝突してコンパイルエラーになる。構造体本体にinitを1つ宣言してmemberwise initの自動生成を止める。
+  # (RevenueCat側が修正版を出し、plugin/PurchasesHybridCommonが追従したらこの回避策は削除する)
+  paywall_color = File.join(installer.sandbox.root.to_s, 'RevenueCat', 'Sources', 'Paywalls', 'PaywallColor.swift')
+  if File.exist?(paywall_color)
+    source = File.read(paywall_color)
+    marker = "    fileprivate var _underlyingColor: (any Sendable)?\n"
+    patch = "    // [thynora patch] suppress the synthesized memberwise init (Xcode 27 Swift)\n    fileprivate init(_suppressMemberwise: Void) { self.stringRepresentation = \"\"; self._underlyingColor = nil }\n"
+    if source.include?(marker) && !source.include?('[thynora patch]')
+      File.chmod(0644, paywall_color) # CocoaPodsは取得したソースを読み取り専用にする
+      File.write(paywall_color, source.sub(marker, marker + patch))
+    end
+  end
+
   assertDeploymentTarget(installer)
 end
