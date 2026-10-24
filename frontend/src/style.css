@@ -124,8 +124,10 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
-  height: 46px;
-  padding: 0 16px;
+  /* iPhoneのアプリ(viewport-fit=cover)では画面がステータスバー(時刻・電池)の下まで広がるため、
+     その分の高さを上に足して、メニューボタンなどが時刻と重ならないようにする。 */
+  height: calc(46px + env(safe-area-inset-top, 0px));
+  padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   background: var(--bg-tabbar);
   border-bottom: 1px solid var(--border);
 }
@@ -1686,6 +1688,7 @@ body {
 .palette-overlay {
   position: fixed;
   inset: 0;
+  padding-top: env(safe-area-inset-top, 0px);
   background: rgba(var(--ink-rgb), 0.28);
   backdrop-filter: blur(3px);
   display: flex;
