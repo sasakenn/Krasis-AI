@@ -1,6 +1,6 @@
 # THYNORA 配布アプリ 残りのタスク
 
-最終更新: 2026-10-17 / Apple 版（iOS・macOS）は保留中
+最終更新: 2026-10-27 / iOS を優先して進行中（macOS は保留）
 
 ## 現状の成果物（すべて未署名）
 - Android: `mobile/android/app/build/outputs/apk/debug/app-debug.apk`（エミュレータで起動確認済み）
@@ -31,24 +31,30 @@
 - [ ] 署名設定を入れて `assembleRelease`（APK）／`bundleRelease`（AAB）を作る
 - [ ] Google Play の登録と公開（個人か法人かの判断が先）
 
-## iOS アプリ内課金（コードは実装済み。アカウントと商品登録が必要）
-- [x] サーバー: RevenueCat Webhook（`/billing/revenuecat/webhook`）、プランの出どころ管理（Stripe/Apple）
-- [x] 画面: iOS アプリ内で購入・復元・サブスク管理（`frontend/src/iap.js`）
+## iOS（進行中。いちばん優先）
+完了済み:
+- [x] Apple Developer Program に登録、Team ID を Xcode に設定、署名（自動）と実機ビルド
+- [x] Sign in with Apple（実機で動作確認済み）、`PrivacyInfo.xcprivacy`、entitlements
 - [x] アカウント削除機能（`DELETE /me`）
-- [ ] RevenueCat のアカウント作成、商品・Offering の登録、Render の環境変数設定（手順は `mobile/README.md`）
-- [ ] サンドボックスで購入・復元・失効のテスト（Apple Developer アカウントが必要）
-- [x] Sign in with Apple（iOS アプリ内のボタン、サーバーの複数 audience 対応、entitlements）
-- [x] `PrivacyInfo.xcprivacy`（プライバシー申告ファイル）
-- [x] プライバシーポリシーの下書き（`PRIVACY.md`。角括弧の項目を埋めて公開する）
-- [ ] Apple Developer の承認確認、Team ID を Xcode の署名に設定
-- [ ] App ID（`com.thynora.app`）の登録、Sign in with Apple と In-App Purchase の有効化
-- [ ] App Store Connect でアプリ作成、サブスク 2 つ作成
-- [ ] Render の `APPLE_CLIENT_ID` に `com.thynora.app` を追加（カンマ区切り）
+- [x] アプリ内課金のコード（サーバーの Webhook、画面の購入・復元、RevenueCat プラグイン）
+- [x] RevenueCat: アプリ登録、App Store Connect との接続、Offering `default`（`$rc_pro`・`$rc_max`）、Webhook、公開 SDK キー（公開サイトに反映済み）
+- [x] App Store Connect: アプリ作成、サブスク 2 つ（Pro 1,400 円・Max 3,300 円）、審査用スクリーンショット
+- [x] iOS のアプリ内では Google ボタンを非表示（Google は WebView でのログインを拒否するため）
+- [x] 上部バーとステータスバー（時刻）の重なりを修正
 
-## Apple 版（保留）
-- [ ] Apple Developer Program の登録（個人か組織か）
-- [ ] iOS: 署名、実機テスト、TestFlight、App Store 提出
-- [ ] macOS: Developer ID 署名と公証、新アイコンで DMG を作り直す
+未完了:
+- [ ] **有料アプリ契約を「有効」にする**（署名・口座・税金・連絡先。口座は登録済み。ステータス要確認）
+- [ ] 商品が App Store Connect から取得できるか確認（RevenueCat で「Pull from store」、Store Status が Missing Metadata でなくなること）
+- [ ] サンドボックスのテスターを作り、iPhone で購入・復元・失効を試す
+- [ ] プライバシーポリシーを完成させて公開（`PRIVACY.md` の角括弧を埋める。公開 URL が提出に必須）
+- [ ] App Store Connect のアプリ情報（説明文、スクリーンショット、カテゴリ、年齢制限、サポート URL、プライバシー URL、「App のプライバシー」申告）
+- [ ] TestFlight で配布して確認 → 審査に提出
+- [ ] Xcode の黄色い警告「Update to recommended settings」を確認（任意）
+- [ ] RevenueCat の確認メールのリンクを押す（未確認だと一部機能が使えない）
+- [ ] RevenueCat の Test Store のサンプル商品（Lifetime・Yearly・Monthly）を整理（任意）
+
+## macOS（保留）
+- [ ] Developer ID 署名と公証、新アイコンで DMG を作り直す
 
 ## 依存パッケージ
 - [ ] `npm audit` の high 8 件（開発用ツールの `http-cache-semantics` が原因。上流の修正待ち。`--omit=dev` では 0 件）
@@ -58,6 +64,6 @@
 - [ ] 法人化するか、いつするか（署名・ストア登録に影響）
 - [ ] ストア公開の時期
 
-## 仕様や資格情報がなく、未実装・未実行のもの
-- ストア課金、アカウント削除機能、プライバシー対応（ストア審査で必須になることが多い）
-- 審査提出
+## 補足
+- 回避策: RevenueCat 5.67.1 は Xcode 27 でそのままだとビルドできないため、`mobile/ios/App/Podfile` の post_install で 1 か所を自動修正している。RevenueCat が修正版を出したら削除する。
+- Render の環境変数（RevenueCat 関連）: `VITE_REVENUECAT_IOS_API_KEY`、`REVENUECAT_WEBHOOK_AUTH`、`APPLE_CLIENT_ID`（`com.thynora.app` を含める）は設定済み。
