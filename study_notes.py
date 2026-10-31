@@ -4,6 +4,7 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from grounding_rules import GROUNDING_RULES_DOCUMENT
 from lang_utils import fallback_answer, normalize_lang
 
 load_dotenv()
@@ -100,7 +101,7 @@ _FOCUS_LABEL = {
 def _build_prompt(document_text: str, focus: str, lang: str) -> str:
     lang = normalize_lang(lang)
     focus_block = f"\n{_FOCUS_LABEL[lang].format(focus=focus)}\n" if focus.strip() else ""
-    return _INSTRUCTIONS[lang].format(focus_block=focus_block, document_text=document_text)
+    return _INSTRUCTIONS[lang].format(focus_block=focus_block, document_text=document_text) + GROUNDING_RULES_DOCUMENT
 
 
 def generate_study_notes(document_text: str, focus: str = "", lang: str = "ja") -> dict:

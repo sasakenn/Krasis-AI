@@ -22,6 +22,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from openpyxl import Workbook
 
+from grounding_rules import GROUNDING_RULES_DOCUMENT, GROUNDING_RULES_STRUCTURED
 from lang_utils import fallback_answer, normalize_lang
 
 load_dotenv()
@@ -93,7 +94,7 @@ def generate_task_text(description: str, lang: str = "ja") -> dict:
 要件:
 {language_requirement}
 - Markdown形式で、必要に応じて見出し(## )や箇条書きを使う
-- 前後に説明文やコードブロック記号は付けず、本文のみを返す"""
+- 前後に説明文やコードブロック記号は付けず、本文のみを返す""" + GROUNDING_RULES_DOCUMENT
 
     try:
         resp = client.messages.create(
@@ -147,7 +148,7 @@ def _build_spreadsheet_prompt(description: str, lang: str) -> str:
 - 合計・平均などが必要な場合は、セルの値をExcelの数式文字列(例: "=SUM(B2:B13)")にしてよい
   (見出し行が1行目になるので、データはheadersの次の行=2行目から始まる前提でセル位置を数えること)
 - 課題に応じて複数シートにしてよい(例: 元データと集計を分ける)
-- 架空のデータで構わないが、課題の要件(項目数・粒度など)を満たす具体的な内容にする"""
+- 架空のデータで構わないが、課題の要件(項目数・粒度など)を満たす具体的な内容にする""" + GROUNDING_RULES_STRUCTURED
 
 
 _FALLBACK_SPREADSHEET_TEXT = {

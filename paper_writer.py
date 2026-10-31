@@ -4,6 +4,7 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from grounding_rules import GROUNDING_RULES_DOCUMENT
 from lang_utils import fallback_answer, normalize_lang
 
 load_dotenv()
@@ -89,7 +90,7 @@ def _build_prompt(title: str, research_question: str, sections: list, target_len
   (文献が「見つかりませんでした」の節は、無理に引用せず一般的な議論として書く)
 - 前後に説明文やJSON・コードブロック記号は付けず、本文のMarkdownのみを返す
 - 冒頭に導入(本文全体の狙いを1段落程度)、末尾に結論(2〜3文程度)を含める
-"""
+""" + GROUNDING_RULES_DOCUMENT
 
 
 def generate_paper_body(

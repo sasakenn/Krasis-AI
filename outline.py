@@ -6,6 +6,7 @@ import re
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from grounding_rules import GROUNDING_RULES_STRUCTURED
 from lang_utils import normalize_lang
 
 load_dotenv()
@@ -206,7 +207,7 @@ def _build_safe_prompt(
       "search_query_native": "日本語検索キーワード"
     }}
   ]
-}}"""
+}}""" + GROUNDING_RULES_STRUCTURED
 
 
 def _parse_model_response(raw_text: str) -> dict:

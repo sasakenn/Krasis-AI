@@ -4,6 +4,7 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from grounding_rules import GROUNDING_RULES_CHAT
 from lang_utils import RESPONSE_QUALITY_INSTRUCTION, fallback_answer, language_instruction
 
 load_dotenv()
@@ -40,6 +41,7 @@ def _build_system_prompt(university: str, faculty: str, department: str, lang: s
         "異なる場合があります。回答の最後に一言その旨を添えてください。\n"
         "です・ます調で、簡潔に答えてください。"
         + RESPONSE_QUALITY_INSTRUCTION
+        + GROUNDING_RULES_CHAT
         + language_instruction(lang)
     )
 

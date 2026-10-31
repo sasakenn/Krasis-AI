@@ -4,6 +4,7 @@ import os
 from anthropic import Anthropic
 from dotenv import load_dotenv
 
+from grounding_rules import GROUNDING_RULES_CHAT
 from lang_utils import RESPONSE_QUALITY_INSTRUCTION, fallback_answer, language_instruction
 
 load_dotenv()
@@ -134,6 +135,7 @@ def _build_system_prompt(level: str, role: str, purpose: str, categories: list, 
         "また実際の最新ニュースとは日時にずれがありうることを、回答の最後に一言添えること。\n"
         "です・ます調で、簡潔かつ具体的に答えてください。"
         + RESPONSE_QUALITY_INSTRUCTION
+        + GROUNDING_RULES_CHAT
         + language_instruction(lang)
     )
 
