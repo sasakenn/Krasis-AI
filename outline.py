@@ -3,7 +3,7 @@ import logging
 import os
 import re
 
-from anthropic import Anthropic
+import llm_providers
 from dotenv import load_dotenv
 
 from grounding_rules import GROUNDING_RULES_STRUCTURED
@@ -14,8 +14,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
-client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+MODEL = llm_providers.model_name()
+client = llm_providers.build_client()
 
 # フォールバック(Claude未使用時)の検索クエリ生成に使う日英対応表。
 _JA_EN_TERMS = {

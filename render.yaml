@@ -18,6 +18,12 @@ services:
         value: https://app.krasis.xyz
       - key: FORCE_HTTPS
         value: "1"
+      - key: LLM_PROVIDER
+        value: anthropic
+      - key: DEEPSEEK_API_KEY
+        sync: false
+      - key: DEEPSEEK_MODEL
+        sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: JWT_SECRET

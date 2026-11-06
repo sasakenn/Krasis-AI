@@ -13,7 +13,7 @@ import json
 import logging
 import os
 
-from anthropic import Anthropic
+import llm_providers
 from dotenv import load_dotenv
 
 from lang_utils import normalize_lang
@@ -23,8 +23,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
-client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+MODEL = llm_providers.model_name()
+client = llm_providers.build_client()
 
 # Claude未使用時のフォールバック目安(分)。
 _FALLBACK_MINUTES = 60
