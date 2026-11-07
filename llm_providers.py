@@ -13,10 +13,13 @@ resp.content[i].text / resp.usage.input_tokens を読む)で呼んでいる。De
 DeepSeekを使うと、利用者の入力内容がDeepSeekのサーバーに送られる。プライバシーポリシーの
 外部サービス一覧への記載と、利用者への説明が必要になる(PRIVACY.md参照)。
 """
+import logging
 import os
 from types import SimpleNamespace
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-5"
 # DeepSeekのモデル名は更新が早い。公式ドキュメント(https://api-docs.deepseek.com/)で確認し、
@@ -95,11 +98,14 @@ def build_client():
     """LLM_PROVIDERに応じたクライアントを返す。APIキー未設定ならNone(各機能がフォールバックする)。"""
     if provider_name() == "deepseek":
         api_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+        # 原因の切り分け用に、使う提供元・モデルと、キーが設定されているか(値は出さない)をログに残す
+        logger.info("LLM provider=deepseek model=%s key_set=%s", model_name(), bool(api_key))
         if not api_key:
             return None
         return DeepSeekClient(api_key, os.getenv("DEEPSEEK_BASE_URL", DEFAULT_DEEPSEEK_BASE_URL))
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+    logger.info("LLM provider=anthropic model=%s key_set=%s", model_name(), bool(api_key))
     if not api_key:
         return None
     from anthropic import Anthropic
