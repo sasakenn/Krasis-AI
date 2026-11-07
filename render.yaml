@@ -18,10 +18,9 @@ services:
         value: https://app.krasis.xyz
       - key: FORCE_HTTPS
         value: "1"
-      # AIの呼び出し先(anthropic / deepseek)。未設定ならanthropic。値はRenderの画面で管理する
-      # (ここで固定値を書くと、デプロイのたびに画面で変えた値が上書きされてしまう)。
-      - key: LLM_PROVIDER
-        sync: false
+      # AIの呼び出し先(anthropic / deepseek)を切り替える環境変数LLM_PROVIDERは、ここには書かない
+      # (書くとRenderが同名の行を自動で作り、画面で追加した行と重複エラーになるため)。
+      # 未設定ならanthropic。DeepSeekを使うときだけ、Renderの画面で LLM_PROVIDER=deepseek を1行追加する。
       - key: DEEPSEEK_API_KEY
         sync: false
       - key: DEEPSEEK_MODEL
