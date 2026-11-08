@@ -76,7 +76,7 @@ Krasis（運営者: Sasa Hiromichi。以下「運営者」といいます。）�
 
 - 運営者名: Krasis（運営者: Sasa Hiromichi）
 - 所在地: [事業者の所在地]
-- 問い合わせ先: [問い合わせ用メールアドレスまたはフォーム URL]
+- 問い合わせ先: support@krasis.xyz
 
 ---
 
