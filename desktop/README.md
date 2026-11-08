@@ -53,3 +53,9 @@ Mac App Store向けのStoreKit実装は、App Store Connectで商品IDを作成�
 3. `/health`、新規ログイン、生成、Pro購入、解約、期限切れ反映を確認する
 4. MacはDeveloper ID署名とNotarization、Windowsはコード署名を設定する
 5. プライバシーポリシー、利用規約、サポートURL、アプリのスクリーンショットを用意する
+
+## 起動画面
+
+起動するとすぐに `splash/`（ローカルファイル）のニューラルネットワークの演出を別ウィンドウで出し、そのあいだに本体ウィンドウで Web 版を読み込む。読み込みが終わり、演出が一通り終わったら本体に切り替える（最長 20 秒で必ず切り替わる）。
+
+本体ウィンドウの User-Agent には `THYNORA-Desktop` を付けている。Web 版の `frontend/public/intro-splash.js` はこれを見て、自分の起動演出を省く（二重に流さないため）。演出の部品は `shared/krasis-splash/` のコピーなので、直すときはそろえること。

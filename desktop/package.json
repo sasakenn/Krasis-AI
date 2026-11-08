@@ -1,5 +1,5 @@
 {
-  "name": "paper-assistant-desktop",
+  "name": "thynora-desktop",
   "version": "1.0.0",
   "private": true,
   "description": "THYNORA desktop shell",
@@ -15,7 +15,7 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "jp.sasahiromichi.paperassistant",
+    "appId": "com.thynora.app",
     "productName": "THYNORA",
     "directories": {
       "output": "release",
@@ -23,7 +23,8 @@
     },
     "files": [
       "main.cjs",
-      "config.example.json"
+      "config.example.json",
+      "splash/**"
     ],
     "extraResources": [
       {

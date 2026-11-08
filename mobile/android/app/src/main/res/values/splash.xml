@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 起動画面の色。Web版の起動演出(krasis-splash)の背景 #08090b に合わせる。 -->
+<resources>
+    <color name="splash_background">#08090B</color>
+</resources>

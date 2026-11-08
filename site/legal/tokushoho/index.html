@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>特定商取引法に基づく表記 | Krasis</title>
+<meta name="description" content="THYNORA（Krasis）の特定商取引法に基づく表記。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M5 5.5 L18.5 12 M5 18.5 L18.5 12' stroke='%2314161A' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='5.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='5' cy='18.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='18.5' cy='12' r='3.3' fill='%23e6ab84'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* site/index.html・site/download/index.html と同じトークン */
+  :root {
+    --bg-app: #F6F4EF;
+    --bg-tabbar: #EFECE5;
+    --bg-panel: #ffffff;
+    --border: rgba(20, 22, 26, 0.09);
+    --border-light: rgba(20, 22, 26, 0.14);
+    --text-head: #14161A;
+    --text-body: #3F434A;
+    --muted-ink: #6E6A60;
+    --accent-blue: #1F3BAE;
+    --void: #08090b;
+    --void-ink: #EDEBE6;
+    --void-ink-2: #9A9DA1;
+    --void-line: rgba(255, 255, 255, 0.09);
+    --gold: #e6ab84;
+    --font-sans: 'Zen Kaku Gothic New', 'Noto Sans JP', system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+    --font-serif: 'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+      --border: #2A2B2C; --border-light: #333536;
+      --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+      --accent-blue: #3A94BC;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+    --border: #2A2B2C; --border-light: #333536;
+    --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+    --accent-blue: #3A94BC;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-head); font-family: var(--font-sans); font-size: 15px; line-height: 1.8; -webkit-font-smoothing: antialiased; font-feature-settings: "palt"; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; border-radius: 3px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 24px; }
+  @media (max-width: 480px) { .wrap { padding-inline: 16px; } }
+
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg-tabbar); border-bottom: 1px solid var(--border); }
+  .topbar .wrap { display: flex; align-items: center; gap: 12px; height: 46px; }
+  .brand { display: inline-flex; align-items: center; gap: 7px; font: 500 11px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-head); text-decoration: none; }
+  .brand svg { width: 15px; height: 15px; color: var(--accent-blue); }
+  .sep { font: 400 11px/1 var(--font-mono); color: var(--muted-ink); }
+  .crumb { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .spacer { flex: 1; }
+  .back { font: 400 12px/1 var(--font-mono); color: var(--muted-ink); text-decoration: none; white-space: nowrap; }
+  .back:hover { color: var(--text-head); }
+
+  main { padding-block: 64px 96px; }
+  .eyebrow { margin: 0 0 14px; font: 500 11.5px/1 var(--font-mono); letter-spacing: .18em; color: var(--muted-ink); }
+  h1 { margin: 0 0 40px; font: 800 clamp(1.7rem, 3.6vw, 2.6rem)/1.35 var(--font-serif); letter-spacing: .01em; }
+
+  dl.law { margin: 0; max-width: 880px; border-top: 1px solid var(--border-light); }
+  .row { display: grid; grid-template-columns: 220px minmax(0, 1fr); column-gap: 40px; padding-block: 18px; border-bottom: 1px solid var(--border); }
+  @media (max-width: 720px) { .row { grid-template-columns: minmax(0, 1fr); row-gap: 6px; } }
+  dt { font: 700 .98rem/1.7 var(--font-serif); color: var(--text-head); }
+  dd { margin: 0; color: var(--text-body); font-size: .93rem; line-height: 1.9; overflow-wrap: anywhere; }
+  dd p { margin: 0; }
+  dd p + p, dd ul + p, dd p + ul { margin-top: 8px; }
+  dd ul { margin: 0; padding-left: 1.2em; }
+  dd .note { font-size: .85rem; color: var(--muted-ink); }
+  dd b { color: var(--text-head); font-weight: 700; }
+  dd a { color: var(--accent-blue); }
+
+  .enacted { margin: 32px 0 0; font: 400 12px/1.7 var(--font-mono); color: var(--muted-ink); }
+
+  footer { background: var(--void); color: var(--void-ink-2); border-top: 1px solid var(--void-line); padding-block: 22px 30px; font: 400 11.5px/1.6 var(--font-mono); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Krasis トップへ">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/></svg>KRASIS
+    </a>
+    <span class="sep">/</span>
+    <span class="crumb">特定商取引法に基づく表記</span>
+    <span class="spacer"></span>
+    <a class="back" href="/">← home</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <p class="eyebrow">LEGAL / THYNORA</p>
+    <h1>特定商取引法に基づく表記</h1>
+
+    <dl class="law">
+      <div class="row">
+        <dt>販売事業者</dt>
+        <dd>笹 裕道（屋号：Krasis）</dd>
+      </div>
+      <div class="row">
+        <dt>運営統括責任者</dt>
+        <dd>笹 裕道</dd>
+      </div>
+      <div class="row">
+        <dt>所在地</dt>
+        <dd>請求があった場合には、遅滞なく開示します。</dd>
+      </div>
+      <div class="row">
+        <dt>電話番号</dt>
+        <dd>
+          <p>請求があった場合には、遅滞なく開示します。</p>
+          <p class="note">お問い合わせ・開示のご請求は、下記のメールアドレスで受け付けます。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>メールアドレス</dt>
+        <dd><a href="mailto:support@krasis.xyz">support@krasis.xyz</a></dd>
+      </div>
+      <div class="row">
+        <dt>販売価格</dt>
+        <dd>
+          <ul>
+            <li><b>Pro</b>：月額 1,399円（税込）</li>
+            <li><b>Max</b>：月額 3,299円（税込）</li>
+          </ul>
+          <p class="note">各プランの申込画面にも税込価格を表示します。実際の価格・課金周期は、申込確定前の画面に表示される内容が適用されます。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>商品代金以外の必要料金</dt>
+        <dd>
+          <p>インターネット接続料金、通信料金等は利用者の負担となります。</p>
+          <p>その他の追加料金がある場合は、申込画面に表示します。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>支払方法</dt>
+        <dd>
+          <ul>
+            <li>Web版・デスクトップ版：Stripe を通じた決済</li>
+            <li>iOSアプリ版：Apple のアプリ内課金</li>
+          </ul>
+          <p class="note">利用可能な支払方法は、各購入画面に表示します。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>支払時期</dt>
+        <dd>申込時に初回分を決済し、以後は各購入画面に表示する周期で自動更新・決済されます。</dd>
+      </div>
+      <div class="row">
+        <dt>サービスの提供時期</dt>
+        <dd>決済の確認後、直ちに対象の有料プランをご利用いただけます。</dd>
+      </div>
+      <div class="row">
+        <dt>契約期間・自動更新</dt>
+        <dd>月額プランは1か月ごとの契約で、利用者が次回更新を停止するまで自動で更新されます。</dd>
+      </div>
+      <div class="row">
+        <dt>解約・更新停止</dt>
+        <dd>
+          <p>Web版・デスクトップ版は本サービス内の案内または Stripe の顧客ポータルから、iOSアプリ版は Apple のサブスクリプション管理画面から手続きしてください。</p>
+          <p>次回更新を停止すると、原則として支払済み期間の終了時に有料プランが終了します。解約の期限は、購入元の画面でご確認ください。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>返品・返金</dt>
+        <dd>
+          <p>デジタルサービスの性質上、提供開始後の返品はお受けできません。</p>
+          <p>利用者都合による途中解約について、日割りでの返金は行いません。ただし、法令上返金が必要な場合、または購入元が返金を認める場合はこの限りではありません。</p>
+        </dd>
+      </div>
+      <div class="row">
+        <dt>動作環境</dt>
+        <dd>
+          <ul>
+            <li>Web版：最新版の Google Chrome・Microsoft Edge・Safari・Firefox</li>
+            <li>Windows版：Windows 10・11（64ビット）</li>
+            <li>iOSアプリ版：App Store の記載に従います</li>
+          </ul>
+        </dd>
+      </div>
+    </dl>
+
+    <p class="enacted">制定日：2026年11月8日</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Krasis</span>
+    <span>THINK BEYOND.</span>
+  </div>
+</footer>
+
+</body>
+</html>

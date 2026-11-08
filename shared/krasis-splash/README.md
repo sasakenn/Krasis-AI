@@ -49,9 +49,19 @@ KrasisSplash.skip();        // 外から終わらせる
 
 ## 注意
 
-- `frontend/public/` に同じファイルのコピーがある（THYNORAアプリの起動画面）。こちらを直したら、あちらにもコピーすること。
+- 同じファイルのコピーが2か所にある。こちらを直したら、両方にもコピーすること。
+  - `frontend/public/`：THYNORAアプリ（Web版・iPhone版・Android版）の起動画面
+  - `desktop/splash/`：デスクトップ版（Windows・Mac）の起動画面
 - OS で「視差効果を減らす」（prefers-reduced-motion）を有効にしている人には、既定では表示しない。`force: true` を渡すと表示する。
 - 画面全体を覆う（`z-index: 2147483000`）。
 - JS より先に黒い画面を出したいときは、`#nn-splash` のマークアップ（`frontend/index.html` を参照）を HTML に直接書いておく。JS はそれを再利用する。
 - フォントは IBM Plex Mono。読み込んでいなければ、等幅の代わりのフォントで表示される。
 - CSP で `style-src 'unsafe-inline'` を許可していないアプリでは、JS による CSS の自動挿入がブロックされる。`krasis-splash.css` を `<link>` で読み込めば動く。読み込み済みなら、JS は CSS を挿入しない。
+
+## 各OSでの起動の流れ
+
+| OS | 最初に出るもの | そのあと |
+|---|---|---|
+| Web | `frontend/index.html` に置いた黒い枠 | Web版の起動演出（このファイル）を再生し、アプリが描画されたら消える |
+| Windows / Mac | `desktop/splash/`（ローカルファイル）の起動演出を、本体の読み込み中に別ウィンドウで再生 | 本体の読み込みが終わったら切り替える。Web版の起動演出は二重にならないよう省く |
+| iPhone / Android | ネイティブの起動画面（暗い背景にニューロンマークの静止画） | Web版の起動演出を再生する |
