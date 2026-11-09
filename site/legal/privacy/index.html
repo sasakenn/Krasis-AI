@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>プライバシーポリシー | Krasis</title>
+<meta name="description" content="THYNORA（Krasis）が利用者の情報をどう扱うかを定めたプライバシーポリシー。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M5 5.5 L18.5 12 M5 18.5 L18.5 12' stroke='%2314161A' stroke-width='1.6' stroke-linecap='round'/%3E%3Ccircle cx='5' cy='5.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='5' cy='18.5' r='2.4' stroke='%2314161A' stroke-width='1.6'/%3E%3Ccircle cx='18.5' cy='12' r='3.3' fill='%23e6ab84'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* site/index.html・site/download/index.html と同じトークン */
+  :root {
+    --bg-app: #F6F4EF;
+    --bg-tabbar: #EFECE5;
+    --bg-panel: #ffffff;
+    --border: rgba(20, 22, 26, 0.09);
+    --border-light: rgba(20, 22, 26, 0.14);
+    --text-head: #14161A;
+    --text-body: #3F434A;
+    --muted-ink: #6E6A60;
+    --accent-blue: #1F3BAE;
+    --void: #08090b;
+    --void-ink: #EDEBE6;
+    --void-ink-2: #9A9DA1;
+    --void-line: rgba(255, 255, 255, 0.09);
+    --gold: #e6ab84;
+    --font-sans: 'Zen Kaku Gothic New', 'Noto Sans JP', system-ui, -apple-system, 'Hiragino Sans', sans-serif;
+    --font-serif: 'Shippori Mincho B1', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
+    --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+      --border: #2A2B2C; --border-light: #333536;
+      --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+      --accent-blue: #3A94BC;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg-app: #121314; --bg-tabbar: #191A1B; --bg-panel: #202122;
+    --border: #2A2B2C; --border-light: #333536;
+    --text-head: #E4E4E4; --text-body: #B5B5B5; --muted-ink: #8E9093;
+    --accent-blue: #3A94BC;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg-app); color: var(--text-head); font-family: var(--font-sans); font-size: 15px; line-height: 1.8; -webkit-font-smoothing: antialiased; font-feature-settings: "palt"; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; border-radius: 3px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding-inline: 24px; }
+  @media (max-width: 480px) { .wrap { padding-inline: 16px; } }
+
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg-tabbar); border-bottom: 1px solid var(--border); }
+  .topbar .wrap { display: flex; align-items: center; gap: 12px; height: 46px; }
+  .brand { display: inline-flex; align-items: center; gap: 7px; font: 500 11px/1 var(--font-mono); letter-spacing: .14em; color: var(--text-head); text-decoration: none; }
+  .brand svg { width: 15px; height: 15px; color: var(--accent-blue); }
+  .sep { font: 400 11px/1 var(--font-mono); color: var(--muted-ink); }
+  .crumb { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .spacer { flex: 1; }
+  .back { font: 400 12px/1 var(--font-mono); color: var(--muted-ink); text-decoration: none; white-space: nowrap; }
+  .back:hover { color: var(--text-head); }
+
+  main { padding-block: 64px 96px; }
+  .doc { max-width: 760px; }
+  .eyebrow { margin: 0 0 14px; font: 500 11.5px/1 var(--font-mono); letter-spacing: .18em; color: var(--muted-ink); }
+  h1 { margin: 0 0 24px; font: 800 clamp(1.7rem, 3.6vw, 2.6rem)/1.35 var(--font-serif); letter-spacing: .01em; }
+  .lead { margin: 0 0 28px; color: var(--text-body); line-height: 2; }
+  .key { margin: 0 0 48px; padding: 20px 22px; background: var(--bg-panel); border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 10px; }
+  .key h2 { margin: 0 0 10px; font: 500 11.5px/1 var(--font-mono); letter-spacing: .14em; color: var(--muted-ink); border: 0; padding: 0; }
+  .key ul { margin: 0; padding-left: 1.2em; color: var(--text-body); font-size: .93rem; line-height: 1.9; }
+  .key li + li { margin-top: 6px; }
+  section { padding-block: 26px; border-top: 1px solid var(--border); }
+  section h2 { margin: 0 0 12px; font: 700 1.12rem/1.6 var(--font-serif); color: var(--text-head); }
+  section h2 .no { font: 500 11.5px/1 var(--font-mono); letter-spacing: .1em; color: var(--muted-ink); margin-right: 10px; }
+  section p, section li { color: var(--text-body); font-size: .93rem; line-height: 1.95; overflow-wrap: anywhere; }
+  section p { margin: 0; }
+  section p + p, section p + ul, section ul + p, section p + .tbl, section .tbl + p { margin-top: 10px; }
+  section ul { margin: 0; padding-left: 1.2em; }
+  section li + li { margin-top: 4px; }
+  section h3 { margin: 16px 0 6px; font-size: .95rem; font-weight: 700; color: var(--text-head); }
+  section b { color: var(--text-head); font-weight: 700; }
+  section a, .key a { color: var(--accent-blue); }
+  .tbl { overflow-x: auto; }
+  table { width: 100%; min-width: 520px; border-collapse: collapse; font-size: .88rem; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--border); color: var(--text-body); line-height: 1.75; }
+  thead th { font: 500 11px/1.4 var(--font-mono); letter-spacing: .06em; color: var(--muted-ink); border-bottom-color: var(--border-light); }
+  tbody th { color: var(--text-head); font-weight: 700; white-space: nowrap; }
+  .enacted { margin: 32px 0 0; font: 400 12px/1.8 var(--font-mono); color: var(--muted-ink); }
+
+  footer { background: var(--void); color: var(--void-ink-2); border-top: 1px solid var(--void-line); padding-block: 22px 30px; font: 400 11.5px/1.6 var(--font-mono); }
+  footer .wrap { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  footer a { color: inherit; }
+  footer a:hover { color: var(--void-ink); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/" aria-label="Krasis トップへ">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 5.5 L18.5 12 M5 18.5 L18.5 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="5" cy="5.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="5" cy="18.5" r="2.4" stroke="currentColor" stroke-width="1.6"/><circle cx="18.5" cy="12" r="3.3" fill="#e6ab84"/></svg>KRASIS
+    </a>
+    <span class="sep">/</span>
+    <span class="crumb">プライバシーポリシー</span>
+    <span class="spacer"></span>
+    <a class="back" href="/">← home</a>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+   <div class="doc">
+    <p class="eyebrow">LEGAL / THYNORA</p>
+    <h1>プライバシーポリシー</h1>
+    <p class="lead">Krasis（以下「運営者」）は、学習支援AI「THYNORA」（Web版・デスクトップ版・モバイル版を含み、以下「本サービス」）とこのサイトで取得する利用者の情報を、個人情報の保護に関する法律その他の法令に従い、以下のとおり取り扱います。</p>
+
+    <div class="key">
+      <h2>まず知っておいてほしいこと</h2>
+      <ul>
+        <li>入力した文章やファイルの内容は、回答を作るために外部のAI（Anthropic社、米国）へ送られます。</li>
+        <li>運営者は、不正利用への対応やお問い合わせへの対応など必要な範囲で、保存された内容を確認することがあります（<a href="#s5">第5条</a>）。</li>
+        <li>入力内容や利用状況は、AIの精度向上を含む本サービスの改善に利用することがあります（<a href="#s3">第3条</a>）。</li>
+        <li>情報の開示・削除・アカウントの削除は、<a href="mailto:support@krasis.xyz">support@krasis.xyz</a> で受け付けます（<a href="#s10">第10条</a>）。</li>
+      </ul>
+    </div>
+
+    <section id="s1">
+      <h2><span class="no">01</span>事業者</h2>
+      <p>笹 裕道（屋号：Krasis）</p>
+      <p>お問い合わせ：<a href="mailto:support@krasis.xyz">support@krasis.xyz</a><br>住所は、請求があった場合に遅滞なく開示します。</p>
+    </section>
+
+    <section id="s2">
+      <h2><span class="no">02</span>取得する情報</h2>
+      <h3>アカウントの情報</h3>
+      <ul>
+        <li>メールアドレス</li>
+        <li>ログインに使ったサービス（Google、GitHub、Microsoft、Apple、メールのログインコード）ごとの識別子</li>
+      </ul>
+      <p>パスワードは保存しません。外部サービスでログインした場合も、氏名やプロフィール画像は保存しません。</p>
+      <h3>入力内容と生成結果</h3>
+      <ul>
+        <li>レポートのテーマや分野、チャットでのやり取り、タスクとその期限、学習ノート、AIエージェントのプロフィール（学年・目的など）</li>
+        <li>AIが作成した構成案・下書き・まとめなどの生成結果</li>
+        <li>アップロードされたファイルから読み取った文章（ファイルそのものは保存しません）</li>
+      </ul>
+      <h3>利用状況の情報</h3>
+      <ul>
+        <li>AIの利用量（トークン数）と、本サービスを開いている時間の記録（1分ごと）</li>
+        <li>ログインの記録（日時、成功・失敗、IPアドレス、ブラウザや端末の情報）</li>
+      </ul>
+      <h3>決済の情報</h3>
+      <ul>
+        <li>契約中のプランと、Stripe 社が発行する顧客ID</li>
+      </ul>
+      <p>クレジットカードの情報は Stripe 社が直接処理し、運営者は保存しません。iOSアプリでの購入は Apple 社が処理します。</p>
+      <h3>端末に保存する情報</h3>
+      <p>ログイン状態の維持、最後に開いていた画面、表示言語、案内表示の既読状況を、ブラウザの localStorage に保存します。運営者自身は Cookie を使用しませんが、Google ログインなどの外部の部品が Cookie を使うことがあります。アクセス解析ツールや広告ツールは使用していません。</p>
+    </section>
+
+    <section id="s3">
+      <h2><span class="no">03</span>利用目的</h2>
+      <ul>
+        <li>本サービスを提供するため（回答の生成、履歴の保存と表示、ファイルの書き出しなど）</li>
+        <li>本人確認、不正なログインの防止、その他の安全対策のため</li>
+        <li>ログインコード、タスクのリマインド、利用者が登録したレポートなどのメールを送るため</li>
+        <li>有料プランの料金を請求し、利用量の上限を管理するため</li>
+        <li>お問い合わせに対応するため</li>
+        <li>利用規約に違反する行為や不正利用に対応するため</li>
+        <li>本サービスの品質向上と新機能の開発のため（AIの回答精度の向上を含みます）</li>
+        <li>個人を特定できない形の統計を作るため</li>
+        <li>重要なお知らせ（規約の変更、障害、セキュリティ事故など）を送るため</li>
+      </ul>
+    </section>
+
+    <section id="s4">
+      <h2><span class="no">04</span>AIによる処理</h2>
+      <p>本サービスは、回答を作るために、入力内容・ファイルから読み取った文章・それまでのやり取りを Anthropic 社（米国）の API に送信します。Anthropic 社は、同社の規約上、API で受け取った内容を自社のAIモデルの学習に使用しません。</p>
+      <p>文献を探す機能では、テーマから作った検索語を、学術文献データベースの OpenAlex（米国）に送信します。</p>
+      <p>AIの出力は誤りを含むことがあります。個人情報や秘密にすべき情報は、必要がない限り入力しないでください。</p>
+    </section>
+
+    <section id="s5">
+      <h2><span class="no">05</span>運営者による確認</h2>
+      <p>運営者は、次の目的に必要な範囲に限り、保存された入力内容・生成結果・ログインの記録を確認することがあります。</p>
+      <ul>
+        <li>不正利用や利用規約違反への対応</li>
+        <li>利用者からのお問い合わせや不具合報告への対応</li>
+        <li>障害やセキュリティ事故の調査</li>
+        <li>本サービスの品質改善</li>
+      </ul>
+      <p>確認できるのは、運営者が指定した管理者だけです。確認した内容を、上記の目的以外に使うことはありません。</p>
+    </section>
+
+    <section id="s6">
+      <h2><span class="no">06</span>第三者への提供</h2>
+      <p>運営者は、次の場合を除き、本人の同意を得ずに個人情報を第三者へ提供しません。</p>
+      <ul>
+        <li>法令に基づく場合</li>
+        <li>人の生命・身体・財産を守るために必要で、本人の同意を得ることが難しい場合</li>
+        <li>国や地方公共団体などの法令上の事務に協力する必要がある場合</li>
+        <li>事業の承継に伴って提供する場合</li>
+        <li>第7条のとおり、業務を委託する場合</li>
+      </ul>
+    </section>
+
+    <section id="s7">
+      <h2><span class="no">07</span>業務の委託と外国の事業者</h2>
+      <p>運営者は、本サービスの運営に必要な範囲で、次の事業者に情報の取扱いを委託します。外国にある事業者を含みます。</p>
+      <div class="tbl">
+        <table>
+          <thead><tr><th scope="col">委託先</th><th scope="col">所在国</th><th scope="col">内容</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Anthropic</th><td>米国</td><td>AIによる回答の生成（入力内容など）</td></tr>
+            <tr><th scope="row">Render</th><td>米国（サーバーはシンガポール）</td><td>アプリとサイトの運用、データの保存</td></tr>
+            <tr><th scope="row">Stripe</th><td>米国</td><td>Web版・デスクトップ版の決済</td></tr>
+            <tr><th scope="row">Apple</th><td>米国</td><td>iOSアプリの決済、Apple でのログイン</td></tr>
+            <tr><th scope="row">Google</th><td>米国</td><td>Google でのログイン、文字（フォント）の配信</td></tr>
+            <tr><th scope="row">GitHub・Microsoft</th><td>米国</td><td>各サービスでのログイン</td></tr>
+            <tr><th scope="row">OpenAlex（OurResearch）</th><td>米国</td><td>文献の検索（検索語）</td></tr>
+            <tr><th scope="row">メール配信事業者</th><td>—</td><td>ログインコード・リマインドなどのメール送信</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>運営者は、委託先が個人情報を適切に扱う体制を整えていることを確認し、必要な監督を行います。各国の個人情報保護制度については、<a href="https://www.ppc.go.jp/personalinfo/legal/kaiseihogohou/#gaikoku" rel="noopener">個人情報保護委員会のページ</a>をご覧ください。</p>
+    </section>
+
+    <section id="s8">
+      <h2><span class="no">08</span>安全管理のための措置</h2>
+      <ul>
+        <li>通信は TLS で暗号化しています。</li>
+        <li>生成結果、履歴の本文、AIエージェントのプロフィール、二段階認証の秘密鍵は、AES-256 で暗号化して保存しています。</li>
+        <li>ログインコードは、そのままの形では保存しません。</li>
+        <li>二段階認証に対応し、ログインに続けて失敗した場合は一定時間ロックします。</li>
+        <li>保存されたデータにアクセスできる人を、運営者が指定した管理者に限っています。</li>
+      </ul>
+      <p>万一、個人情報の漏えいなどが起きた場合は、影響を受ける利用者に速やかに知らせ、法令に従って個人情報保護委員会へ報告します。</p>
+    </section>
+
+    <section id="s9">
+      <h2><span class="no">09</span>保存期間</h2>
+      <p>取得した情報は、利用目的に必要な期間保存します。アカウントが削除された場合は、法令上保存が必要な情報と、不正利用への対応に必要なログインの記録を除き、合理的な期間内に削除します。バックアップからの削除には時間がかかることがあります。</p>
+    </section>
+
+    <section id="s10">
+      <h2><span class="no">10</span>開示・訂正・削除・利用停止</h2>
+      <p>利用者は、自分の個人情報について、利用目的の通知、開示、訂正・追加・削除、利用の停止・消去、第三者への提供の停止、アカウントの削除を請求できます。<a href="mailto:support@krasis.xyz">support@krasis.xyz</a> へご連絡ください。本人確認のうえ、遅滞なく対応します。手数料はかかりません。</p>
+      <p>履歴、チャット、タスクは、アプリの画面からも1件ずつ削除できます。</p>
+    </section>
+
+    <section id="s11">
+      <h2><span class="no">11</span>未成年の方の利用</h2>
+      <p>未成年の方は、保護者の同意を得たうえで本サービスを利用してください。</p>
+    </section>
+
+    <section id="s12">
+      <h2><span class="no">12</span>このポリシーの変更</h2>
+      <p>運営者は、法令の変更や本サービスの内容の変更に合わせて、このポリシーを変更することがあります。重要な変更は、このページと本サービス上でお知らせします。</p>
+    </section>
+
+    <section id="s13">
+      <h2><span class="no">13</span>お問い合わせ窓口</h2>
+      <p>笹 裕道（屋号：Krasis）<br><a href="mailto:support@krasis.xyz">support@krasis.xyz</a></p>
+      <p>関連ページ：<a href="/legal/tokushoho/">特定商取引法に基づく表記</a></p>
+    </section>
+
+    <p class="enacted">制定日：2026年11月9日</p>
+   </div>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 Krasis</span>
+    <a href="/legal/tokushoho/">特定商取引法に基づく表記</a>
+    <a href="/legal/privacy/" aria-current="page">プライバシーポリシー</a>
+    <span>THINK BEYOND.</span>
+  </div>
+</footer>
+
+</body>
+</html>
