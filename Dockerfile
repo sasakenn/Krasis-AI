@@ -34,6 +34,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY *.py ./
+# /legal/terms で配信する利用規約の本文(app.pyのlegal_termsが読む)
+COPY TERMS.md ./
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 # SQLite(data/app.db)は永続ディスクをここにマウントする想定(render.yamlのdisk.mountPath)。
