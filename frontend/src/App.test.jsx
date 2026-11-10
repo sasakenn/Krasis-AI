@@ -87,6 +87,9 @@ const DEFAULT_USAGE = {
   tokens_used: 100,
   tokens_quota: 20000,
   period_start: '2026-01-01T00:00:00+00:00',
+  current_terms_version: '2026-11-08',
+  terms_version: '2026-11-08',
+  terms_accepted_at: '2026-11-08T00:00:00+00:00',
 }
 
 // /tasks への GET/POST/PUT/DELETE をインメモリで模倣する簡易フェイクバックエンド。
@@ -155,6 +158,7 @@ function mockFetch({
   securityEvents = [],
 } = {}) {
   let call = 0
+  let acceptedTermsVersion = usage.terms_version
   let historyItems = history.items.map((item) => ({ is_private: false, ...item }))
   const sessionsBackend = createFakeSessionsBackend(sessions)
   const tasksBackend = createFakeTasksBackend(tasks)
@@ -164,7 +168,12 @@ function mockFetch({
     const method = options.method || 'GET'
 
     if (url === '/me') {
-      return Promise.resolve(jsonResponse(usage))
+      return Promise.resolve(jsonResponse({ ...usage, terms_version: acceptedTermsVersion }))
+    }
+
+    if (url === '/me/terms-acceptance' && method === 'POST') {
+      acceptedTermsVersion = JSON.parse(options.body).version
+      return Promise.resolve(jsonResponse({ terms_version: acceptedTermsVersion, accepted_at: '2026-11-08T00:00:00+00:00' }))
     }
 
     if (url === '/activity/ping' && method === 'POST') {
@@ -320,6 +329,24 @@ beforeEach(() => {
   // 入れておく(未ログイン時の挙動を見るテストは個別にトークンを消してから使う)。
   localStorage.setItem('paper-assistant-token', 'test-token')
   mockFetch()
+})
+
+describe('TermsAcceptance', () => {
+  it('requires explicit acceptance before loading the app', async () => {
+    mockFetch({ usage: { ...DEFAULT_USAGE, terms_version: null, terms_accepted_at: null } })
+    renderApp()
+
+    const dialog = await screen.findByRole('dialog')
+    const acceptButton = within(dialog).getByRole('button', { name: '利用規約に同意して続ける' })
+    expect(acceptButton).toBeDisabled()
+    expect(global.fetch).not.toHaveBeenCalledWith('/sessions', expect.anything())
+
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(acceptButton)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '# outline-generator' })).toBeInTheDocument())
+    expect(global.fetch).toHaveBeenCalledWith('/me/terms-acceptance', expect.objectContaining({ method: 'POST' }))
+  })
 })
 
 describe('App', () => {

@@ -646,6 +646,37 @@ def test_me_returns_plan_and_quota():
     assert "tokens_used" in body
 
 
+def test_terms_acceptance_gates_production_api_and_records_version(monkeypatch):
+    user_id = "terms-acceptance-test-user"
+    token = app_module.create_app_token(user_id)
+    headers = {"Authorization": f"Bearer {token}", "X-Dev-User-Id": ""}
+    monkeypatch.setattr(app_module, "IS_PRODUCTION", True)
+
+    me_resp = client.get("/me", headers=headers)
+    assert me_resp.status_code == 200
+    assert me_resp.json()["terms_version"] is None
+    assert client.get("/sessions", headers=headers).status_code == 428
+
+    stale = client.post("/me/terms-acceptance", json={"version": "outdated"}, headers=headers)
+    assert stale.status_code == 409
+
+    accepted = client.post(
+        "/me/terms-acceptance",
+        json={"version": app_module.CURRENT_TERMS_VERSION},
+        headers=headers,
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["terms_version"] == app_module.CURRENT_TERMS_VERSION
+    assert accepted.json()["accepted_at"]
+    assert client.get("/sessions", headers=headers).status_code == 200
+
+
+def test_legal_terms_endpoint_returns_terms_document():
+    resp = client.get("/legal/terms")
+    assert resp.status_code == 200
+    assert resp.text.startswith("# THYNORA 利用規約")
+
+
 def test_me_reports_is_admin_flag():
     admin_resp = client.get("/me")
     assert admin_resp.json()["is_admin"] is True

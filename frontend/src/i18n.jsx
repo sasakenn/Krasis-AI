@@ -88,6 +88,18 @@ const translations = {
     languageLabel: { ja: '言語', en: 'Language', ko: '언어' },
   },
 
+  terms: {
+    checking: { ja: '利用規約の確認状況を確認しています…', en: 'Checking terms acceptance…', ko: '이용약관 동의 상태를 확인하는 중…' },
+    loadFailed: { ja: '利用規約の確認に失敗しました。接続を確認して再試行してください。', en: 'Could not verify terms acceptance. Check your connection and try again.', ko: '이용약관 동의를 확인하지 못했습니다. 연결을 확인하고 다시 시도해 주세요.' },
+    retry: { ja: '再試行', en: 'Retry', ko: '다시 시도' },
+    title: { ja: '利用を始める前に', en: 'Before you continue', ko: '계속하기 전에' },
+    summary: { ja: 'THYNORAを利用するには、利用規約を確認して同意してください。', en: 'Review and accept the Terms of Service to use THYNORA.', ko: 'THYNORA를 이용하려면 이용약관을 확인하고 동의해 주세요.' },
+    read: { ja: '利用規約を読む', en: 'Read the Terms of Service', ko: '이용약관 읽기' },
+    agree: { ja: '利用規約に同意します', en: 'I agree to the Terms of Service', ko: '이용약관에 동의합니다' },
+    continue: { ja: '利用規約に同意して続ける', en: 'Agree and continue', ko: '동의하고 계속하기' },
+    saving: { ja: '同意を記録しています…', en: 'Recording acceptance…', ko: '동의를 기록하는 중…' },
+  },
+
   home: {
     greeting: { ja: '今日は何をしますか?', en: 'What would you like to do today?', ko: '오늘은 무엇을 하시겠어요?' },
     usageTitle: { ja: '利用時間', en: 'Usage time', ko: '이용 시간' },

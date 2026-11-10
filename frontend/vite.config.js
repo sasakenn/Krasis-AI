@@ -22,6 +22,7 @@ export default defineConfig({
       '/literature': 'http://127.0.0.1:8000',
       '/mode-history': 'http://127.0.0.1:8000',
       '/activity': 'http://127.0.0.1:8000',
+      '/legal/terms': 'http://127.0.0.1:8000',
       // '/admin'自体はSPAのページパス(AdminDashboard)なのでプロキシせず、
       // '/admin/'配下のAPIパスだけをバックエンドへ転送する。
       '/admin/overview': 'http://127.0.0.1:8000',

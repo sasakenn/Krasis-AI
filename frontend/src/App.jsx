@@ -3728,6 +3728,10 @@ export default function App() {
   // ログイン状態(Apple/Google/GitHub/開発用ログインのいずれかで取得したセッショントークン)。
   const [authToken, setAuthTokenState] = useState(() => getStoredToken())
   const [authExchanging, setAuthExchanging] = useState(false)
+  const [termsStatus, setTermsStatus] = useState('loading')
+  const [termsChecked, setTermsChecked] = useState(false)
+  const [termsSubmitting, setTermsSubmitting] = useState(false)
+  const [termsError, setTermsError] = useState(null)
 
   // /admin(管理ダッシュボード)への遷移をSPA内で扱うための現在パス。
   // フルページ遷移(location.href)にしないのは、開発時のVite devサーバーが
@@ -3749,6 +3753,11 @@ export default function App() {
 
   function setAuthToken(token) {
     setAuthTokenState(token)
+    if (!token || !authToken) {
+      setTermsStatus('loading')
+      setTermsChecked(false)
+      setTermsError(null)
+    }
     try {
       if (token) localStorage.setItem(TOKEN_STORAGE_KEY, token)
       else localStorage.removeItem(TOKEN_STORAGE_KEY)
@@ -3826,13 +3835,17 @@ export default function App() {
       if (resp.ok) {
         const data = await resp.json()
         setUsage(data)
+        setTermsStatus(data.current_terms_version && data.terms_version === data.current_terms_version ? 'accepted' : 'required')
         return data
       }
+      setTermsStatus('error')
+      setTermsError(await readErrorMessage(resp))
     } catch {
-      // 使用量表示の取得に失敗しても致命的ではないので黙って諦める
+      setTermsStatus('error')
+      setTermsError(t('terms.loadFailed'))
     }
     return null
-  }, [])
+  }, [t])
 
   useEffect(() => {
     if (authToken) fetchUsage()
@@ -3841,7 +3854,7 @@ export default function App() {
   // ホーム画面の利用時間グラフ向けに、タブが表示されている間だけ60秒おきに生存確認を送る。
   // Claude APIは呼ばないのでトークンやレート制限への影響はない。
   useEffect(() => {
-    if (!authToken) return undefined
+    if (!authToken || termsStatus !== 'accepted') return undefined
 
     function sendPing() {
       if (document.visibilityState === 'visible') {
@@ -3856,7 +3869,7 @@ export default function App() {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', sendPing)
     }
-  }, [authToken])
+  }, [authToken, termsStatus])
 
   const [billingLoading, setBillingLoading] = useState(false)
 
@@ -3953,7 +3966,12 @@ export default function App() {
   const savedSnapshots = useRef({})
 
   useEffect(() => {
-    if (!authToken) return
+    if (!authToken || termsStatus !== 'accepted') {
+      setSessionsLoaded(false)
+      setSessions([])
+      setActiveId(null)
+      return
+    }
     let cancelled = false
 
     async function loadSessions() {
@@ -3998,7 +4016,27 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [authToken])
+  }, [authToken, termsStatus])
+
+  async function handleAcceptTerms() {
+    setTermsError(null)
+    setTermsSubmitting(true)
+    try {
+      if (!usage?.current_terms_version) throw new Error(t('terms.loadFailed'))
+      const resp = await apiFetch('/me/terms-acceptance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version: usage.current_terms_version }),
+      })
+      if (!resp.ok) throw new Error(await readErrorMessage(resp))
+      setTermsStatus('accepted')
+      await fetchUsage()
+    } catch (err) {
+      setTermsError(String(err))
+    } finally {
+      setTermsSubmitting(false)
+    }
+  }
 
   useEffect(() => {
     if (!sessionsLoaded || activeId == null) return
@@ -4327,6 +4365,49 @@ export default function App() {
 
   if (!authToken) {
     return <LoginScreen onToken={setAuthToken} initialMfaToken={pendingMfaToken} initialError={oauthError} />
+  }
+
+  if (termsStatus === 'loading') {
+    return <div className="app-root app-loading">{t('terms.checking')}</div>
+  }
+
+  if (termsStatus === 'error') {
+    return (
+      <div className="app-root app-loading terms-gate-error">
+        <p>{termsError || t('terms.loadFailed')}</p>
+        <button type="button" className="terms-primary-button" onClick={fetchUsage}>{t('terms.retry')}</button>
+      </div>
+    )
+  }
+
+  if (termsStatus === 'required') {
+    return (
+      <div className="terms-gate">
+        <section className="terms-gate-panel" role="dialog" aria-modal="true" aria-labelledby="terms-gate-title">
+          <p className="terms-gate-eyebrow">THYNORA / TERMS</p>
+          <h1 id="terms-gate-title">{t('terms.title')}</h1>
+          <p>{t('terms.summary')}</p>
+          <a href={`${API_ORIGIN}/legal/terms`} target="_blank" rel="noreferrer">{t('terms.read')}</a>
+          <label className="terms-gate-checkbox">
+            <input
+              type="checkbox"
+              checked={termsChecked}
+              onChange={(event) => setTermsChecked(event.target.checked)}
+            />
+            <span>{t('terms.agree')}</span>
+          </label>
+          {termsError && <p className="terms-gate-error-message" role="alert">{termsError}</p>}
+          <button
+            type="button"
+            className="terms-primary-button"
+            disabled={!termsChecked || termsSubmitting}
+            onClick={handleAcceptTerms}
+          >
+            {termsSubmitting ? t('terms.saving') : t('terms.continue')}
+          </button>
+        </section>
+      </div>
+    )
   }
 
   if (pathname === '/admin') {

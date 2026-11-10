@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ai_agents import (
@@ -67,6 +67,7 @@ from db import (
     get_generation,
     get_history_entry,
     get_mfa_enrollment,
+    get_latest_terms_acceptance,
     get_or_create_entitlement,
     get_token_version,
     get_user_email,
@@ -88,6 +89,7 @@ from db import (
     get_prompt_entry_detail,
     record_activity_ping,
     record_security_event,
+    record_terms_acceptance,
     save_generation,
     save_history_entry,
     set_generation_privacy,
@@ -529,6 +531,7 @@ def _clear_login_failures(key: str) -> None:
 # "testclient" はStarletteのTestClient(ネットワークを経由しないin-process呼び出し)が
 # 使うプレースホルダーホスト名で、テストスイートがこの経路を使い続けられるように許可する。
 _DEV_BYPASS_ALLOWED_HOSTS = {"127.0.0.1", "::1", "testclient"}
+CURRENT_TERMS_VERSION = "2026-11-08"
 
 
 def _is_same_machine_request(request: Request) -> bool:
@@ -552,22 +555,27 @@ def get_current_user(
     許してしまうため、環境変数の設定ミス1つで本番が突破される事態を防ぐ)。
     """
     if DEV_BYPASS_USER_ID and x_dev_user_id and not IS_PRODUCTION and _is_same_machine_request(request):
-        return x_dev_user_id
+        user_id = x_dev_user_id
+    else:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            raise HTTPException(status_code=401, detail="missing bearer token")
 
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="missing bearer token")
+        token = authorization[len("Bearer "):].strip()
+        try:
+            user_id, token_version = decode_app_token(token)
+        except AuthError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
 
-    token = authorization[len("Bearer "):].strip()
-    try:
-        user_id, token_version = decode_app_token(token)
-    except AuthError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
+        # ログアウト(全端末)・MFA有効化/無効化でtoken_versionが繰り上がっていたら、
+        # 有効期限内のJWTでも「既に失効したセッション」として拒否する。
+        if token_version != get_token_version(user_id):
+            raise HTTPException(status_code=401, detail="session has been signed out, please log in again")
 
-    # ログアウト(全端末)・MFA有効化/無効化でtoken_versionが繰り上がっていたら、
-    # 有効期限内のJWTでも「既に失効したセッション」として拒否する。
-    if token_version != get_token_version(user_id):
-        raise HTTPException(status_code=401, detail="session has been signed out, please log in again")
-
+    terms_endpoint = request.url.path == "/me/terms-acceptance" and request.method == "POST"
+    if IS_PRODUCTION and request.url.path != "/me" and not terms_endpoint:
+        acceptance = get_latest_terms_acceptance(user_id)
+        if not acceptance or acceptance["terms_version"] != CURRENT_TERMS_VERSION:
+            raise HTTPException(status_code=428, detail="Current terms of service must be accepted")
     return user_id
 
 
@@ -1959,7 +1967,26 @@ def auth_security_events(user_id: str = Depends(get_current_user)):
 def me(user_id: str = Depends(get_current_user)):
     entitlement = get_or_create_entitlement(user_id)
     quota = PLAN_TOKEN_QUOTAS.get(entitlement["plan"], PLAN_TOKEN_QUOTAS["free"])
-    return {**entitlement, "tokens_quota": quota, "is_admin": _is_admin(user_id)}
+    acceptance = get_latest_terms_acceptance(user_id)
+    return {
+        **entitlement,
+        "tokens_quota": quota,
+        "is_admin": _is_admin(user_id),
+        "current_terms_version": CURRENT_TERMS_VERSION,
+        "terms_version": acceptance["terms_version"] if acceptance else None,
+        "terms_accepted_at": acceptance["accepted_at"] if acceptance else None,
+    }
+
+
+class TermsAcceptanceRequest(BaseModel):
+    version: str
+
+
+@app.post("/me/terms-acceptance")
+def accept_terms(payload: TermsAcceptanceRequest, user_id: str = Depends(get_current_user)):
+    if payload.version != CURRENT_TERMS_VERSION:
+        raise HTTPException(status_code=409, detail="The terms version has changed; reload and review the current terms")
+    return record_terms_acceptance(user_id, payload.version)
 
 
 @app.delete("/me")
@@ -2267,6 +2294,14 @@ def sessions_delete(session_id: int, user_id: str = Depends(get_current_user)):
 # バックエンドと同一オリジンで配信できるように静的ファイルとしてマウントする。
 # ビルドしていない開発時はこのディレクトリが存在しないため何もしない(devサーバー+プロキシ運用のまま)。
 _FRONTEND_DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+@app.get("/legal/terms", include_in_schema=False)
+def legal_terms():
+    return FileResponse(
+        os.path.join(os.path.dirname(__file__), "TERMS.md"),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
 if os.path.isdir(_FRONTEND_DIST_DIR):
     app.mount("/", StaticFiles(directory=_FRONTEND_DIST_DIR, html=True), name="frontend")
 

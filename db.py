@@ -178,6 +178,16 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS terms_acceptances (
+                user_id TEXT NOT NULL,
+                terms_version TEXT NOT NULL,
+                accepted_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, terms_version)
+            )
+            """
+        )
 
         # 列追加前のDBファイルを引き続き使えるようにする簡易マイグレーション。
         _ensure_column(conn, "generations", "user_id", "TEXT", backfill=LEGACY_USER_ID)
@@ -229,6 +239,42 @@ def get_user_email(user_id: str) -> str | None:
     with _connect() as conn:
         row = conn.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
     return row["email"] if row and row["email"] else None
+
+
+def get_latest_terms_acceptance(user_id: str) -> dict | None:
+    with _connect() as conn:
+        row = conn.execute(
+            """
+            SELECT terms_version, accepted_at
+            FROM terms_acceptances
+            WHERE user_id = ?
+            ORDER BY accepted_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def record_terms_acceptance(user_id: str, terms_version: str) -> dict:
+    accepted_at = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO terms_acceptances (user_id, terms_version, accepted_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, terms_version, accepted_at),
+        )
+        row = conn.execute(
+            """
+            SELECT terms_version, accepted_at
+            FROM terms_acceptances
+            WHERE user_id = ? AND terms_version = ?
+            """,
+            (user_id, terms_version),
+        ).fetchone()
+    return dict(row)
 
 
 def get_token_version(user_id: str) -> int:
@@ -836,6 +882,7 @@ _USER_DATA_TABLES = (
     "activity_pings",
     "tasks",
     "ai_agents_subscriptions",
+    "terms_acceptances",
 )
 
 
