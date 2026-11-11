@@ -551,6 +551,10 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Proにアップグレード' })).toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'Maxにアップグレード' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '解約・プラン管理' })).not.toBeInTheDocument()
+    // 購入ボタンの近くに、自動更新の説明と、利用規約・プライバシーポリシーへのリンクがある
+    expect(screen.getByText(/自動更新されるサブスクリプション/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '利用規約' })).toHaveAttribute('href', expect.stringContaining('/legal/terms'))
+    expect(screen.getByRole('link', { name: 'プライバシーポリシー' })).toHaveAttribute('href', 'https://krasis.xyz/legal/privacy/')
 
     fireEvent.click(screen.getByRole('button', { name: 'Proにアップグレード' }))
 

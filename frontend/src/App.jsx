@@ -22,6 +22,8 @@ import itoMascot from './assets/ito-mascot.png'
 import { isAppleSignInAvailable, requestAppleIdentityToken } from './appleSignIn'
 import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, isNativeApp, purchasePlan, restorePurchases } from './iap'
 
+const PRIVACY_POLICY_URL = 'https://krasis.xyz/legal/privacy/'
+
 // mermaidは重いので、logic-guideで図解が実際に必要になるまで読み込まない。
 // アプリ全体が紙のような明るい配色(style.cssの--bg-app等)なので、既定の'dark'テーマだと
 // 図だけ浮いて見える。'base'テーマ+themeVariablesで、アプリの配色に合わせたパステル調に統一する。
@@ -4670,6 +4672,16 @@ export default function App() {
                     {t('sidebar.restorePurchases')}
                   </button>
                 )}
+                {/* アプリストアの審査要件: 購入ボタンの近くに、自動更新の説明と、利用規約・
+                    プライバシーポリシーへのリンクを置く(Web版でも同じ内容を示す)。 */}
+                <p className="subscription-notice">
+                  {isIosNativeApp() ? t('sidebar.subscriptionNoticeIos') : t('sidebar.subscriptionNoticeWeb')}
+                </p>
+                <p className="subscription-legal-links">
+                  <a href={`${API_ORIGIN}/legal/terms`} target="_blank" rel="noreferrer">{t('sidebar.termsLink')}</a>
+                  <span aria-hidden="true"> · </span>
+                  <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer">{t('sidebar.privacyLink')}</a>
+                </p>
               </div>
             ) : (
               usage && (

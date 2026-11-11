@@ -143,6 +143,18 @@ const translations = {
     tokensThisMonth: { ja: 'TOKENS · 今月', en: 'TOKENS · this month', ko: 'TOKENS · 이번 달' },
     upgradePro: { ja: 'Proにアップグレード', en: 'Upgrade to Pro', ko: 'Pro로 업그레이드' },
     upgradeMax: { ja: 'Maxにアップグレード', en: 'Upgrade to Max', ko: 'Max로 업그레이드' },
+    subscriptionNoticeIos: {
+      ja: 'Pro・Maxは1か月ごとに自動更新されるサブスクリプションです。料金はApple IDに請求され、期間終了の24時間前までに解約しない限り自動で更新されます。解約はiOSの「設定」→「サブスクリプション」から行えます。',
+      en: 'Pro and Max are auto-renewing monthly subscriptions. Payment is charged to your Apple ID, and the subscription renews automatically unless cancelled at least 24 hours before the end of the period. Cancel anytime in iOS Settings > Subscriptions.',
+      ko: 'Pro·Max는 1개월마다 자동 갱신되는 구독입니다. 요금은 Apple ID로 청구되며, 기간 종료 24시간 전까지 해지하지 않으면 자동으로 갱신됩니다. 해지는 iOS의 「설정」→「구독」에서 할 수 있습니다.',
+    },
+    subscriptionNoticeWeb: {
+      ja: 'Pro・Maxは1か月ごとに自動更新されるサブスクリプションです。解約は「解約・プラン管理」からいつでも行えます。',
+      en: 'Pro and Max are auto-renewing monthly subscriptions. Cancel anytime from "Cancel or manage plan".',
+      ko: 'Pro·Max는 1개월마다 자동 갱신되는 구독입니다. 해지는 「해지 및 플랜 관리」에서 언제든지 할 수 있습니다.',
+    },
+    termsLink: { ja: '利用規約', en: 'Terms of Use', ko: '이용약관' },
+    privacyLink: { ja: 'プライバシーポリシー', en: 'Privacy Policy', ko: '개인정보 처리방침' },
     restorePurchases: { ja: '購入を復元', en: 'Restore purchases', ko: '구매 복원' },
     managePlan: { ja: '解約・プラン管理', en: 'Cancel or manage plan', ko: '해지 및 플랜 관리' },
     adminDashboard: { ja: '管理ダッシュボード', en: 'Admin dashboard', ko: '관리 대시보드' },
