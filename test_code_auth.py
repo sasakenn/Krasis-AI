@@ -234,6 +234,25 @@ def test_expired_login_code_is_rejected(monkeypatch):
     assert "有効期限" in resp.json()["detail"]
 
 
+def test_app_review_account_code_does_not_expire(monkeypatch):
+    """審査担当者用のメールアドレス(APP_REVIEW_EMAIL)だけは、審査が数日かかっても
+    ログインできるよう、コードの有効期限を適用しない回帰テスト。他のアカウントは従来どおり。"""
+    monkeypatch.setattr(app_module, "CODE_LOGIN_TTL_SECONDS", 1)
+    monkeypatch.setattr(app_module, "APP_REVIEW_EMAIL", "app-review-test@example.com")
+    _, review_code = _signup("app-review-test@example.com")
+    _, other_code = _signup("not-review-test@example.com")
+
+    import time
+    time.sleep(1.2)
+
+    review = client.post("/auth/code/login", json={"email": "App-Review-Test@example.com", "code": review_code})
+    assert review.status_code == 200
+    assert review.json()["token"]
+
+    other = client.post("/auth/code/login", json={"email": "not-review-test@example.com", "code": other_code})
+    assert other.status_code == 401
+
+
 def test_reissue_resets_the_code_expiry(monkeypatch):
     """再発行すると有効期限もリセットされ、新しいコードは(元のコードの発行時刻からは
     既に期限切れであっても)まだ有効であることの回帰テスト。"""

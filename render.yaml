@@ -53,6 +53,9 @@ services:
         sync: false
       - key: REVENUECAT_PRODUCT_PLANS
         sync: false
+      # App Storeの審査担当者用のメールアドレス。このアドレスのログインコードだけは期限切れにしない(審査後は削除)。
+      - key: APP_REVIEW_EMAIL
+        sync: false
       - key: MICROSOFT_CLIENT_ID
         sync: false
       - key: MICROSOFT_CLIENT_SECRET

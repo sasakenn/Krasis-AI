@@ -366,6 +366,10 @@ CODE_AUTH_LOCKOUT_SECONDS = int(os.getenv("CODE_AUTH_LOCKOUT_SECONDS", "900"))
 # 発行(または再発行)から一定時間が過ぎたコードは(正しくても)ログインに使えなくする。
 # 0以下で無効化(無期限)。
 CODE_LOGIN_TTL_SECONDS = int(os.getenv("CODE_LOGIN_TTL_SECONDS", str(24 * 60 * 60)))
+# App Storeの審査担当者用のアカウント(メールアドレス1つ)だけは、コードの有効期限を適用しない。
+# 審査は数日かかることがあり、途中でコードが切れると担当者がログインできず審査が止まるため。
+# 失敗回数によるロックとレート制限は、通常のアカウントと同じく適用する。審査が終わったら未設定に戻す。
+APP_REVIEW_EMAIL = os.getenv("APP_REVIEW_EMAIL", "").strip().lower()
 
 # 本番で1にすると、HTTPアクセスをHTTPSへリダイレクトしHSTSヘッダーを付与する。
 FORCE_HTTPS = os.getenv("FORCE_HTTPS", "").strip() in ("1", "true", "yes")
@@ -1212,7 +1216,7 @@ def auth_code_login(payload: CodeLoginRequest, request: Request):
         record_security_event("login_failed", email, "ログインコード不一致", ip_address=ip_address, user_agent=user_agent)
         raise HTTPException(status_code=401, detail="メールアドレスまたはコードが正しくありません")
 
-    if _is_code_expired(record["code_issued_at"]):
+    if email != APP_REVIEW_EMAIL and _is_code_expired(record["code_issued_at"]):
         _register_login_failure(email)
         record_security_event("login_failed", email, "ログインコード期限切れ", ip_address=ip_address, user_agent=user_agent)
         raise HTTPException(
