@@ -253,6 +253,17 @@ def test_app_review_account_code_does_not_expire(monkeypatch):
     assert other.status_code == 401
 
 
+def test_signup_returns_503_with_guidance_when_smtp_fails():
+    """SMTPの認証エラー等でメールを送れなかった場合、500ではなく再発行を促す503を返す回帰テスト。"""
+    import smtplib
+
+    with patch("app.send_email", side_effect=smtplib.SMTPAuthenticationError(535, b"auth failed")):
+        resp = client.post("/auth/code/signup", json={"email": "smtp-fail-test@example.com"})
+
+    assert resp.status_code == 503
+    assert "再発行" in resp.json()["detail"]
+
+
 def test_reissue_resets_the_code_expiry(monkeypatch):
     """再発行すると有効期限もリセットされ、新しいコードは(元のコードの発行時刻からは
     既に期限切れであっても)まだ有効であることの回帰テスト。"""

@@ -5,6 +5,7 @@ import io
 import logging
 import os
 import secrets
+import smtplib
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -1154,6 +1155,21 @@ def _require_mail_configured() -> None:
         )
 
 
+def _send_login_code_email(email: str, subject: str, body: str) -> None:
+    """ログインコードのメールを送る。SMTPの失敗(認証エラー、送信元の拒否、接続できない等)を
+    500のままにせず、原因の種類をログに残して、利用者には再試行を促す503を返す。
+    コードはDBに保存済みなので、再発行(「コードを忘れた」)でやり直せる。"""
+    try:
+        send_email(email, subject, body)
+    except (smtplib.SMTPException, OSError) as exc:
+        # 例外の型とSMTPの応答コードだけを出す(本文やパスワードはログに出さない)
+        logger.error("ログインコードのメール送信に失敗しました: %s %s", type(exc).__name__, getattr(exc, "smtp_code", ""))
+        raise HTTPException(
+            status_code=503,
+            detail="ログインコードのメールを送れませんでした。時間をおいて「ログインコードを忘れた」から再発行してください。",
+        ) from exc
+
+
 @app.post("/auth/code/signup")
 def auth_code_signup(payload: CodeSignupRequest, request: Request):
     """メールアドレスだけで新規アカウントを作り、ログイン用の乱数コードを発行する。
@@ -1190,7 +1206,7 @@ def auth_code_signup(payload: CodeSignupRequest, request: Request):
         create_code_login(user_id, email, _hash_code(code))
         upsert_user(user_id, email)
 
-    send_email(
+    _send_login_code_email(
         email,
         "【THYNORA】ログインコードの発行",
         f"あなたのログインコードは次の通りです:\n\n{code}\n\n"
@@ -1282,7 +1298,7 @@ def auth_code_reissue(payload: CodeReissueRequest, request: Request):
     if record:
         new_code = _generate_login_code()
         update_code_login_hash(record["user_id"], _hash_code(new_code))
-        send_email(
+        _send_login_code_email(
             email,
             "【THYNORA】ログインコードの再発行",
             f"新しいログインコードは次の通りです:\n\n{new_code}\n\n"
