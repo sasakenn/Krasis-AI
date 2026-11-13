@@ -54,7 +54,14 @@ def send_email(to: str, subject: str, body: str) -> None:
     message["From"] = SMTP_FROM
     message["To"] = to
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as server:
-        server.starttls()
+    # 465番は最初からTLSで接続する方式(SMTPS)。587番などと同じSTARTTLSで接続すると、
+    # サーバーに切断される(SMTPServerDisconnected)ため、ポートで接続方式を切り替える。
+    if SMTP_PORT == 465:
+        server_context = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10)
+    else:
+        server_context = smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10)
+    with server_context as server:
+        if SMTP_PORT != 465:
+            server.starttls()
         server.login(SMTP_USER, SMTP_PASSWORD)
         server.send_message(message)
