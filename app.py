@@ -536,7 +536,7 @@ def _clear_login_failures(key: str) -> None:
 # "testclient" はStarletteのTestClient(ネットワークを経由しないin-process呼び出し)が
 # 使うプレースホルダーホスト名で、テストスイートがこの経路を使い続けられるように許可する。
 _DEV_BYPASS_ALLOWED_HOSTS = {"127.0.0.1", "::1", "testclient"}
-CURRENT_TERMS_VERSION = "2026-11-08"
+CURRENT_TERMS_VERSION = "2026-11-15"
 
 
 def _is_same_machine_request(request: Request) -> bool:
