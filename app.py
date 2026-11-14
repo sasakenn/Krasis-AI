@@ -24,7 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from pypdf import PdfReader
 
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ai_agents import (
@@ -36,6 +36,7 @@ from ai_agents import (
     answer_finance_economics_question,
 )
 from lang_utils import ai_agents_email_subject, default_question, normalize_lang
+from legal_pages import markdown_to_html
 from auth import (
     AuthError,
     create_app_token,
@@ -2316,10 +2317,8 @@ def sessions_delete(session_id: int, user_id: str = Depends(get_current_user)):
 _FRONTEND_DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 @app.get("/legal/terms", include_in_schema=False)
 def legal_terms():
-    return FileResponse(
-        os.path.join(os.path.dirname(__file__), "TERMS.md"),
-        media_type="text/plain; charset=utf-8",
-    )
+    with open(os.path.join(os.path.dirname(__file__), "TERMS.md"), encoding="utf-8") as f:
+        return HTMLResponse(markdown_to_html(f.read()))
 
 
 if os.path.isdir(_FRONTEND_DIST_DIR):

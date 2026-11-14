@@ -674,7 +674,10 @@ def test_terms_acceptance_gates_production_api_and_records_version(monkeypatch):
 def test_legal_terms_endpoint_returns_terms_document():
     resp = client.get("/legal/terms")
     assert resp.status_code == 200
-    assert resp.text.startswith("# THYNORA 利用規約")
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "<h1>THYNORA 利用規約</h1>" in resp.text
+    assert '<a href="mailto:support@krasis.xyz">' in resp.text
+    assert "# THYNORA" not in resp.text
 
 
 def test_me_reports_is_admin_flag():
