@@ -83,6 +83,11 @@ services:
         sync: false
       - key: SMTP_FROM
         sync: false
+      # 無料プランはSMTPのポートが遮断されるため、ResendのHTTP APIで送る(設定するとSMTPより優先)。
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_FROM
+        sync: false
       - key: ADMIN_EMAILS
         sync: false
       - key: SECURITY_CONTACT_EMAIL
