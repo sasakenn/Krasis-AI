@@ -20,7 +20,7 @@ import {
 import { AI_LANGUAGE_NAMES, LANGUAGES, getStoredLanguage, localeFor, useLanguage } from './i18n'
 import itoMascot from './assets/ito-mascot.png'
 import { isAppleSignInAvailable, requestAppleIdentityToken } from './appleSignIn'
-import { SUBSCRIPTIONS_URL, isIapAvailable, isIosNativeApp, isNativeApp, purchasePlan, restorePurchases } from './iap'
+import { SUBSCRIPTIONS_URL, describePurchaseError, isIapAvailable, isIosNativeApp, isNativeApp, purchasePlan, restorePurchases } from './iap'
 
 const PRIVACY_POLICY_URL = 'https://krasis.xyz/legal/privacy/'
 
@@ -3891,7 +3891,7 @@ export default function App() {
     try {
       if (await purchasePlan(plan, usage?.user_id)) await refreshUsageUntilPaid()
     } catch (err) {
-      setSidebarError(`${t('errors.upgradeFailed')}: ${String(err?.message || err)}`)
+      setSidebarError(`${t('errors.upgradeFailed')}: ${describePurchaseError(err)}`)
     } finally {
       setBillingLoading(false)
     }
@@ -3904,7 +3904,7 @@ export default function App() {
       await restorePurchases(usage?.user_id)
       await refreshUsageUntilPaid()
     } catch (err) {
-      setSidebarError(`${t('errors.upgradeFailed')}: ${String(err?.message || err)}`)
+      setSidebarError(`${t('errors.upgradeFailed')}: ${describePurchaseError(err)}`)
     } finally {
       setBillingLoading(false)
     }

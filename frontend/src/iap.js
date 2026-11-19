@@ -73,3 +73,15 @@ export async function restorePurchases(userId) {
   const Purchases = await ensureConfigured(userId)
   await Purchases.restorePurchases()
 }
+
+// RevenueCatのエラーは、messageだけだと「There was a problem with the App Store.」のように
+// 原因が分からない。エラーコードとApple側の元のエラー文も並べて、問い合わせや調査に使えるようにする。
+export function describePurchaseError(err) {
+  const data = err?.data || {}
+  const parts = [
+    err?.message || String(err),
+    err?.readableErrorCode || data.readableErrorCode || err?.code || data.code,
+    err?.underlyingErrorMessage || data.underlyingErrorMessage,
+  ]
+  return [...new Set(parts.filter(Boolean).map(String))].join(' / ')
+}
