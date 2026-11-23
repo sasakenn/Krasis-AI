@@ -2371,9 +2371,10 @@ body {
     overflow: hidden;
     overscroll-behavior: none;
   }
+  /* !important: .course-picker input[type='text'] のような、より強い指定の13pxにも勝たせるため */
   .app-root input,
   .app-root textarea,
   .app-root select {
-    font-size: 16px;
+    font-size: 16px !important;
   }
 }
