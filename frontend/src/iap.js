@@ -83,5 +83,18 @@ export function describePurchaseError(err) {
     err?.readableErrorCode || data.readableErrorCode || err?.code || data.code,
     err?.underlyingErrorMessage || data.underlyingErrorMessage,
   ]
-  return [...new Set(parts.filter(Boolean).map(String))].join(' / ')
+  const summary = [...new Set(parts.filter(Boolean).map(String))].join(' / ')
+  // それでも原因が分からないことがあるため、エラーに付いている情報(コード・Apple側の詳細など)を
+  // そのまま添える。スタックトレースのような長い内部情報は除く。
+  let detail = ''
+  try {
+    const extra = { ...data }
+    for (const key of Object.getOwnPropertyNames(err || {})) {
+      if (!['stack', 'message', 'data'].includes(key)) extra[key] = err[key]
+    }
+    detail = JSON.stringify(extra)
+  } catch {
+    detail = ''
+  }
+  return detail && detail !== '{}' ? `${summary} ${detail}` : summary
 }
