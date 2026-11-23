@@ -3878,6 +3878,18 @@ export default function App() {
   // iOSアプリ内ではStripeではなくAppleのアプリ内課金で購入する(購入後はWebhookでプランが
   // 更新されるため、反映されるまで少し待ってから利用状況を取り直す)。
   async function refreshUsageUntilPaid() {
+    // Webhookの到着を待たず、サーバーからRevenueCatへ契約状況を問い合わせて反映させる。
+    // 反映がまだならWebhookでの反映も待つ(下のポーリング)。
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        const resp = await apiFetch('/billing/revenuecat/sync', { method: 'POST' })
+        if (resp.ok && (await resp.json()).plan !== 'free') break
+      } catch {
+        // 問い合わせに失敗しても、下のポーリングで反映を待つ
+      }
+      if (attempt >= 2) break
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+    }
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 1500))
       const data = await fetchUsage()

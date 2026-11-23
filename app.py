@@ -17,6 +17,7 @@ from urllib.parse import quote
 from contextlib import asynccontextmanager
 
 import crypto_utils
+import requests
 import stripe
 from docx import Document
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
@@ -2229,6 +2230,13 @@ async def billing_webhook(request: Request):
 # iOSアプリ内のサブスク購入はAppleのアプリ内課金で行い(Stripeの決済ページへは誘導しない)、
 # RevenueCatがレシートを検証してこのWebhookに通知する。app_user_idにはこのアプリのuser_idを使う。
 REVENUECAT_WEBHOOK_AUTH = os.getenv("REVENUECAT_WEBHOOK_AUTH", "").strip()
+# 購入直後にサーバーからRevenueCatへ契約状況を問い合わせるためのキー(Webhookの到着を待たずに
+# プランを反映する)。読み取り専用のiOS公開SDKキー(アプリに埋め込む値と同じ)で足りるため、
+# 専用の値が無ければVITE_REVENUECAT_IOS_API_KEYを使う。
+REVENUECAT_API_KEY = (
+    os.getenv("REVENUECAT_API_KEY", "").strip() or os.getenv("VITE_REVENUECAT_IOS_API_KEY", "").strip()
+)
+REVENUECAT_API_URL = "https://api.revenuecat.com/v1/subscribers/"
 # App Store Connectで作る商品ID→プラン。環境変数で上書きできる(形式: 商品ID:プラン,商品ID:プラン)。
 _DEFAULT_REVENUECAT_PRODUCT_PLANS = {
     "com.thynora.app.pro.monthly": "pro",
@@ -2290,6 +2298,54 @@ async def revenuecat_webhook(request: Request):
             set_plan(user_id, "free")
 
     return {"status": "ok"}
+
+
+def _active_revenuecat_plan(subscriber: dict) -> Optional[str]:
+    """RevenueCatの契約情報から、いま有効な一番上のプランを返す(無ければNone)。"""
+    now = datetime.now(timezone.utc)
+    best = None
+    for product_id, sub in (subscriber.get("subscriptions") or {}).items():
+        plan = REVENUECAT_PRODUCT_PLANS.get(product_id)
+        expires = sub.get("expires_date")
+        if not plan or not expires or sub.get("refunded_at"):
+            continue
+        if datetime.fromisoformat(expires.replace("Z", "+00:00")) <= now:
+            continue
+        if best is None or PLAN_TOKEN_QUOTAS[plan] > PLAN_TOKEN_QUOTAS[best]:
+            best = plan
+    return best
+
+
+@app.post("/billing/revenuecat/sync")
+def revenuecat_sync(user_id: str = Depends(get_current_user)):
+    """購入・復元の直後にアプリから呼ぶ。RevenueCatに契約状況を問い合わせてプランを反映する。
+
+    Webhookが遅れたり届かなかったりしても、購入した本人の画面ですぐにプランが変わるようにする。
+    プランの根拠はRevenueCat(Appleのレシート検証済み)の情報だけで、アプリからの申告は信用しない。
+    """
+    if not REVENUECAT_API_KEY:
+        raise HTTPException(status_code=503, detail="RevenueCatのAPIキーが設定されていません")
+    try:
+        resp = requests.get(
+            REVENUECAT_API_URL + quote(user_id, safe=""),
+            headers={"Authorization": f"Bearer {REVENUECAT_API_KEY}", "X-Platform": "ios"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        subscriber = resp.json().get("subscriber") or {}
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("RevenueCat sync failed: %s", type(exc).__name__)
+        raise HTTPException(status_code=502, detail="購入情報を確認できませんでした。時間をおいて再度お試しください") from exc
+
+    plan = _active_revenuecat_plan(subscriber)
+    current = get_or_create_entitlement(user_id)
+    if plan:
+        set_plan(user_id, plan, "apple")
+    elif current.get("plan_source") == "apple" and current.get("plan") != "free":
+        # Appleの契約が切れている(Stripeの契約は巻き込まない)
+        set_plan(user_id, "free")
+    logger.warning("RevenueCat sync: user=%s… plan=%s", user_id[:12], plan)
+    return {"plan": plan or get_or_create_entitlement(user_id)["plan"]}
 
 
 @app.get("/sessions")

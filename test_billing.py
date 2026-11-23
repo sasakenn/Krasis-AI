@@ -337,3 +337,49 @@ def test_stripe_cancellation_does_not_revert_apple_plan(monkeypatch):
         resp = client.post("/billing/webhook", content=b"{}", headers={"stripe-signature": "t"})
     assert resp.status_code == 200
     assert db.get_or_create_entitlement(user_id)["plan"] == "pro"
+
+
+# --- /billing/revenuecat/sync (購入直後の問い合わせ) ---
+
+
+def _rc_subscriber(expires_by_product):
+    return {"subscriber": {"subscriptions": {
+        product: {"expires_date": expires, "refunded_at": None} for product, expires in expires_by_product.items()
+    }}}
+
+
+def test_revenuecat_sync_applies_the_highest_active_plan(monkeypatch):
+    monkeypatch.setattr(app_module, "REVENUECAT_API_KEY", "appl_test")
+    future = "2999-01-01T00:00:00Z"
+    with patch("app.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = _rc_subscriber({
+            "com.thynora.app.pro.monthly": future,
+            "com.thynora.app.max.monthly": future,
+        })
+        resp = client.post("/billing/revenuecat/sync")
+    assert resp.status_code == 200
+    assert resp.json()["plan"] == "max"
+    ent = db.get_or_create_entitlement(DEFAULT_TEST_USER_ID)
+    assert (ent["plan"], ent["plan_source"]) == ("max", "apple")
+
+
+def test_revenuecat_sync_reverts_expired_apple_plan_but_not_stripe(monkeypatch):
+    monkeypatch.setattr(app_module, "REVENUECAT_API_KEY", "appl_test")
+    expired = {"com.thynora.app.pro.monthly": "2000-01-01T00:00:00Z"}
+
+    db.set_plan(DEFAULT_TEST_USER_ID, "pro", "apple")
+    with patch("app.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = _rc_subscriber(expired)
+        client.post("/billing/revenuecat/sync")
+    assert db.get_or_create_entitlement(DEFAULT_TEST_USER_ID)["plan"] == "free"
+
+    db.set_plan(DEFAULT_TEST_USER_ID, "pro", "stripe")
+    with patch("app.requests.get") as mock_get:
+        mock_get.return_value.json.return_value = _rc_subscriber(expired)
+        client.post("/billing/revenuecat/sync")
+    assert db.get_or_create_entitlement(DEFAULT_TEST_USER_ID)["plan"] == "pro"
+
+
+def test_revenuecat_sync_returns_503_without_api_key(monkeypatch):
+    monkeypatch.setattr(app_module, "REVENUECAT_API_KEY", "")
+    assert client.post("/billing/revenuecat/sync").status_code == 503
