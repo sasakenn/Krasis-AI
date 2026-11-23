@@ -4439,7 +4439,7 @@ export default function App() {
           {t('topbar.search')}<span className="topbar-kbd">⌘K</span>
         </button>
         {usage && (
-          <span className="topbar-plan">{usage.plan === 'free' ? t('topbar.planFree') : usage.plan === 'pro' ? t('topbar.planPro') : t('topbar.planMax')}</span>
+          <span className={`topbar-plan topbar-plan-${usage.plan}`}>{usage.plan === 'free' ? t('topbar.planFree') : usage.plan === 'pro' ? t('topbar.planPro') : t('topbar.planMax')}</span>
         )}
       </div>
 

@@ -307,6 +307,17 @@ def test_revenuecat_purchase_grants_plan_and_expiration_reverts_it(monkeypatch):
     assert db.get_or_create_entitlement(user_id)["plan"] == "free"
 
 
+def test_revenuecat_product_change_uses_the_new_product(monkeypatch):
+    """RevenueCatのPRODUCT_CHANGEは、product_idに変更前、new_product_idに変更後の商品が入る。"""
+    user_id = "dev:rc-upgrade-user"
+    db.upsert_user(user_id, None)
+    db.set_plan(user_id, "pro", "apple")
+    payload = _rc_event("PRODUCT_CHANGE", user_id, "com.thynora.app.pro.monthly")
+    payload["event"]["new_product_id"] = "com.thynora.app.max.monthly"
+    assert _post_rc(monkeypatch, payload).status_code == 200
+    assert db.get_or_create_entitlement(user_id)["plan"] == "max"
+
+
 def test_revenuecat_expiration_does_not_touch_stripe_plan(monkeypatch):
     user_id = "dev:rc-stripe-user"
     db.upsert_user(user_id, None)

@@ -2273,12 +2273,17 @@ async def revenuecat_webhook(request: Request):
     user_id = event.get("app_user_id")
     if not user_id or not user_exists(user_id):
         # 未知のユーザー(匿名IDなど)は無視する。再送を止めるため200で返す。
+        # プランが反映されない原因を調べられるよう、種類とIDの先頭だけをログに残す。
+        logger.warning("RevenueCat webhook ignored: type=%s user=%s…", event_type, str(user_id)[:12])
         return {"status": "ignored"}
 
     if event_type in _REVENUECAT_GRANT_EVENTS:
-        plan = REVENUECAT_PRODUCT_PLANS.get(event.get("product_id"))
+        # PRODUCT_CHANGE(ProからMaxへの変更など)は、変更後の商品がnew_product_idに入る
+        product_id = event.get("new_product_id") or event.get("product_id")
+        plan = REVENUECAT_PRODUCT_PLANS.get(product_id)
         if plan:
             set_plan(user_id, plan, "apple")
+        logger.warning("RevenueCat webhook: type=%s product=%s plan=%s", event_type, product_id, plan)
     elif event_type == "EXPIRATION":
         # Appleでの契約が切れた時だけfreeに戻す(Stripe契約を巻き込まない)
         if get_or_create_entitlement(user_id).get("plan_source") == "apple":
