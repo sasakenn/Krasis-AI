@@ -87,6 +87,25 @@ def test_billing_checkout_returns_502_on_stripe_error(monkeypatch):
 # --- /billing/portal ---
 
 
+def test_checkout_switches_existing_stripe_subscription_instead_of_creating_another(monkeypatch):
+    """Proで契約中にMaxを選んだら、新しい契約(二重課金)ではなく今の契約の料金を差し替える。"""
+    _configure_stripe(monkeypatch)
+    db.set_stripe_customer(DEFAULT_TEST_USER_ID, "cus_upgrade")
+    db.set_plan(DEFAULT_TEST_USER_ID, "pro", "stripe")
+    subscription = {"id": "sub_1", "items": {"data": [{"id": "si_1", "price": {"id": "price_pro_fake"}}]}}
+
+    with patch("app.stripe.Subscription.list", return_value=MagicMock(data=[subscription])), \
+            patch("app.stripe.Subscription.modify") as mock_modify, \
+            patch("app.stripe.checkout.Session.create") as mock_checkout:
+        resp = client.post("/billing/checkout", json={"plan": "max"})
+
+    assert resp.status_code == 200
+    assert resp.json() == {"changed": True}
+    mock_checkout.assert_not_called()
+    assert mock_modify.call_args.args[0] == "sub_1"
+    assert mock_modify.call_args.kwargs["items"] == [{"id": "si_1", "price": "price_max_fake"}]
+
+
 def test_billing_portal_requires_stripe_configured(monkeypatch):
     monkeypatch.setattr(app_module.stripe, "api_key", "")
     resp = client.post("/billing/portal")

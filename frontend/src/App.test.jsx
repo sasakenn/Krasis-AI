@@ -571,6 +571,8 @@ describe('App', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '解約・プラン管理' })).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: 'Proにアップグレード' })).not.toBeInTheDocument()
+    // Proの人には、上位のMaxへ上げるボタンを出す
+    expect(screen.getByRole('button', { name: 'Maxにアップグレード' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '解約・プラン管理' }))
 
@@ -578,6 +580,14 @@ describe('App', () => {
       const portalCall = global.fetch.mock.calls.find(([url]) => url === '/billing/portal')
       expect(portalCall).toBeTruthy()
     })
+  })
+
+  it('hides the upgrade buttons on the Max plan', async () => {
+    mockFetch({ usage: { ...DEFAULT_USAGE, plan: 'max' } })
+    renderApp()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '解約・プラン管理' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: 'Maxにアップグレード' })).not.toBeInTheDocument()
   })
 
   it('logs out and returns to the login screen', async () => {

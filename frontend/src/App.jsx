@@ -3877,13 +3877,23 @@ export default function App() {
 
   // iOSアプリ内ではStripeではなくAppleのアプリ内課金で購入する(購入後はWebhookでプランが
   // 更新されるため、反映されるまで少し待ってから利用状況を取り直す)。
-  async function refreshUsageUntilPaid() {
+  async function refreshUsageUntilPlan(plan) {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const data = await fetchUsage()
+      if (data?.plan === plan) return
+    }
+  }
+
+  async function refreshUsageUntilPaid(targetPlan) {
+    // targetPlan(購入したプラン)に変わるまで待つ。復元のように分からない場合は、有料になれば終わり。
+    const done = (plan) => (targetPlan ? plan === targetPlan : plan && plan !== 'free')
     // Webhookの到着を待たず、サーバーからRevenueCatへ契約状況を問い合わせて反映させる。
     // 反映がまだならWebhookでの反映も待つ(下のポーリング)。
     for (let attempt = 0; attempt < 10; attempt += 1) {
       try {
         const resp = await apiFetch('/billing/revenuecat/sync', { method: 'POST' })
-        if (resp.ok && (await resp.json()).plan !== 'free') break
+        if (resp.ok && done((await resp.json()).plan)) break
       } catch {
         // 問い合わせに失敗しても、下のポーリングで反映を待つ
       }
@@ -3893,7 +3903,7 @@ export default function App() {
     for (let attempt = 0; attempt < 10; attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 1500))
       const data = await fetchUsage()
-      if (data && data.plan !== 'free') return
+      if (done(data?.plan)) return
     }
   }
 
@@ -3901,7 +3911,7 @@ export default function App() {
     setSidebarError(null)
     setBillingLoading(true)
     try {
-      if (await purchasePlan(plan, usage?.user_id)) await refreshUsageUntilPaid()
+      if (await purchasePlan(plan, usage?.user_id)) await refreshUsageUntilPaid(plan)
     } catch (err) {
       setSidebarError(`${t('errors.upgradeFailed')}: ${describePurchaseError(err)}`)
     } finally {
@@ -3934,6 +3944,12 @@ export default function App() {
       })
       if (!resp.ok) throw new Error(await readErrorMessage(resp))
       const data = await resp.json()
+      if (data.changed) {
+        // 契約中のプランを差し替えた(決済ページは不要)。Webhookでの反映を待つ。
+        await refreshUsageUntilPlan(plan)
+        setBillingLoading(false)
+        return
+      }
       window.location.href = data.checkout_url
     } catch (err) {
       setSidebarError(`${t('errors.upgradeFailed')}: ${String(err)}`)
@@ -4697,14 +4713,38 @@ export default function App() {
               </div>
             ) : (
               usage && (
-                <button
-                  type="button"
-                  className="upgrade-button"
-                  disabled={billingLoading}
-                  onClick={handleManageBilling}
-                >
-                  {t('sidebar.managePlan')}
-                </button>
+                <div className="upgrade-buttons">
+                  {usage.plan === 'pro' && (
+                    <button
+                      type="button"
+                      className="upgrade-button"
+                      disabled={billingLoading}
+                      onClick={() => handleUpgrade('max')}
+                    >
+                      {t('sidebar.upgradeMax')}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="upgrade-button"
+                    disabled={billingLoading}
+                    onClick={handleManageBilling}
+                  >
+                    {t('sidebar.managePlan')}
+                  </button>
+                  {usage.plan === 'pro' && (
+                    <>
+                      <p className="subscription-notice">
+                        {isIosNativeApp() ? t('sidebar.subscriptionNoticeIos') : t('sidebar.subscriptionNoticeWeb')}
+                      </p>
+                      <p className="subscription-legal-links">
+                        <a href={`${API_ORIGIN}/legal/terms`} target="_blank" rel="noreferrer">{t('sidebar.termsLink')}</a>
+                        <span aria-hidden="true"> · </span>
+                        <a href={PRIVACY_POLICY_URL} target="_blank" rel="noreferrer">{t('sidebar.privacyLink')}</a>
+                      </p>
+                    </>
+                  )}
+                </div>
               )
             )}
 

@@ -2143,6 +2143,25 @@ def billing_checkout(payload: CheckoutRequest, user_id: str = Depends(get_curren
         raise HTTPException(status_code=400, detail=f"unknown or unconfigured plan: {payload.plan}")
 
     entitlement = get_or_create_entitlement(user_id)
+    # 既にStripeで契約中(例: Pro)なら、新しい契約を作ると二重課金になるため、今の契約の
+    # 料金プランを差し替える(差額は日割りで、すぐに請求する)。プランはWebhookで反映される。
+    customer_id = entitlement.get("stripe_customer_id")
+    if customer_id and entitlement.get("plan_source") == "stripe":
+        try:
+            subscriptions = stripe.Subscription.list(customer=customer_id, status="active", limit=1)
+            current = subscriptions.data[0] if subscriptions.data else None
+            if current:
+                item = current["items"]["data"][0]
+                if item["price"]["id"] != price_id:
+                    stripe.Subscription.modify(
+                        current["id"],
+                        items=[{"id": item["id"], "price": price_id}],
+                        proration_behavior="always_invoice",
+                    )
+                return {"changed": True}
+        except stripe.error.StripeError as exc:
+            raise HTTPException(status_code=502, detail=f"Stripeでのプラン変更に失敗しました: {exc}") from exc
+
     session_params = {
         "mode": "subscription",
         "line_items": [{"price": price_id, "quantity": 1}],
@@ -2150,8 +2169,8 @@ def billing_checkout(payload: CheckoutRequest, user_id: str = Depends(get_curren
         "cancel_url": f"{FRONTEND_ORIGIN}/?checkout=cancel",
         "client_reference_id": user_id,
     }
-    if entitlement.get("stripe_customer_id"):
-        session_params["customer"] = entitlement["stripe_customer_id"]
+    if customer_id:
+        session_params["customer"] = customer_id
 
     try:
         session = stripe.checkout.Session.create(**session_params)
